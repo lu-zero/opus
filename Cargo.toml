@@ -1,0 +1,18 @@
+[package]
+name = "opus"
+version = "0.1.0"
+authors = ["Luca Barbato <lu_zero@gentoo.org>"]
+license = "MIT"
+description = "Pure-rust opus decoder"
+repository = "https://github.com/rust-av/opus"
+readme = "README.md"
+keywords = ["opus"]
+
+[dependencies]
+av-data = { version = "0.1.0", path = "../rust-av/data" }
+av-bitstream = { version = "0.1.0", path = "../rust-av/bitstream" }
+av-codec = { version = "0.1.0", path = "../rust-av/codec" }
+
+[dev-dependencies]
+av-format = { version = "0.1.0", path = "../rust-av/format" }
+matroska = { version = "0.1.0", path = "../matroska" }
