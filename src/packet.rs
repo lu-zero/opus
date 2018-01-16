@@ -68,7 +68,7 @@ fn xiph_lacing_u16(buf: &[u8]) -> Result<(usize, usize)> {
             v += 4 * buf[1] as usize;
             Ok((2, v))
         } else {
-            Err(ErrorKind::InvalidData.into())
+            Err(Error::InvalidData)
         }
     } else {
         Ok((1, v as usize))
@@ -91,7 +91,7 @@ fn xiph_lacing_u32(buf: &[u8]) -> Result<(usize, usize)> {
         }
 
         if v > u32::MAX - 255 {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(Error::InvalidData);
         }
     }
     Ok((o, v as usize))
@@ -114,7 +114,7 @@ impl<'a> Packet<'a> {
         self.vbr = false;
 
         if buf.len() & 1 != 0 {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(Error::InvalidData);
         }
 
         for b in buf.chunks(buf.len()) {
@@ -129,7 +129,7 @@ impl<'a> Packet<'a> {
 
         let (off, len) = xiph_lacing_u16(buf)?;
         if len + off > buf.len() {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(Error::InvalidData);
         }
 
         let (b1, b2) = buf[off..].split_at(len);
@@ -147,7 +147,7 @@ impl<'a> Packet<'a> {
         let padding = (buf[0] >> 6) & 0x01 == 1;
 
         if count == 0 || count > MAX_FRAMES {
-            return Err(ErrorKind::InvalidData.into());
+            return Err(Error::InvalidData);
         }
 
         let buf = if padding {
@@ -176,7 +176,7 @@ impl<'a> Packet<'a> {
         } else {
             let len = buf.len() / count;
             if len * count != buf.len() || len > MAX_FRAME_SIZE {
-                return Err(ErrorKind::InvalidData.into());
+                return Err(Error::InvalidData);
             }
 
             for b in buf.chunks(len) {
