@@ -17,13 +17,35 @@ enum Mode {
     HYBRID,
 }
 
+/// Bandwidth
+///
+/// See [section-2.1.3](https://tools.ietf.org/html/rfc6716#section-2.1.3)
 #[derive(Debug, PartialEq, Clone)]
 enum Bandwidth {
-    Narrow,
-    Medium,
-    Wide,
-    SuperWide,
-    Full,
+    Narrow = 8000,
+    Medium = 12000,
+    Wide = 16000,
+    SuperWide = 24000,
+    Full = 48000,
+}
+
+/// Frame Duration
+///
+/// See [section-2.1.4](https://tools.ietf.org/html/rfc6716#section-2.1.4)
+#[derive(Debug, PartialEq, Clone)]
+enum FrameDuration {
+    /// 2.5ms
+    VeryShort = 120,
+    /// 5ms
+    Short = 240,
+    /// 10ms
+    Medium = 480,
+    /// 20ms
+    Standard = 960,
+    /// 40ms,
+    Long = 1920,
+    /// 60ms
+    VeryLong = 2880,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -35,7 +57,7 @@ pub struct Packet<'a> {
     padding: usize,
     mode: Mode,
     bandwidth: Bandwidth,
-    frame_duration: usize,
+    frame_duration: FrameDuration,
     frames: Vec<&'a [u8]>,
 }
 
@@ -171,7 +193,7 @@ impl<'a> Packet<'a> {
             vbr: false,
             config: 0,
             padding: 0,
-            frame_duration: 0,
+            frame_duration: FrameDuration::Standard,
             mode: Mode::HYBRID,
             bandwidth: Bandwidth::Wide,
             frames: Vec::new(),
@@ -226,10 +248,10 @@ impl<'a> Packet<'a> {
                     _ => unreachable!(),
                 }
                 match c & 0b11 {
-                    0 => p.frame_duration = 480,
-                    1 => p.frame_duration = 960,
-                    2 => p.frame_duration = 1920,
-                    3 => p.frame_duration = 2880,
+                    0 => p.frame_duration = FrameDuration::Medium,
+                    1 => p.frame_duration = FrameDuration::Standard,
+                    2 => p.frame_duration = FrameDuration::Long,
+                    3 => p.frame_duration = FrameDuration::VeryLong,
                     _ => unreachable!(),
                 }
             },
@@ -243,6 +265,11 @@ impl<'a> Packet<'a> {
                         p.bandwidth = Bandwidth::Full;
                     },
                     _ => unreachable!(),
+                }
+                match c & 0b1 {
+                    0 => p.frame_duration = FrameDuration::Medium,
+                    1 => p.frame_duration = FrameDuration::Standard,
+                    _ => unreachable!()
                 }
             },
             c @ 16 ... 31 => {
@@ -263,10 +290,10 @@ impl<'a> Packet<'a> {
                     _ => unreachable!(),
                 }
                 match c & 0b11 {
-                    0 => p.frame_duration = 120,
-                    1 => p.frame_duration = 240,
-                    2 => p.frame_duration = 480,
-                    3 => p.frame_duration = 960,
+                    0 => p.frame_duration = FrameDuration::VeryShort,
+                    1 => p.frame_duration = FrameDuration::Short,
+                    2 => p.frame_duration = FrameDuration::Medium,
+                    3 => p.frame_duration = FrameDuration::Standard,
                     _ => unreachable!(),
                 }
             },
