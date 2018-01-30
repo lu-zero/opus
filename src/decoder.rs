@@ -5,25 +5,21 @@ use data::frame::ArcFrame;
 
 use packet::*;
 
+use entropy::RangeDecoder;
+use silk::Silk;
+
 struct Des {
     descr: Descr,
 }
 
 struct Dec {
     extradata: Option<Vec<u8>>,
-    /*
-    sample_rate: usize,
-    channels: usize,
-    streams: usize,
-    coupled_streams: usize,
-    mapping: Vec<u8>,
-    gain: usize,
-    */
+    silk: Option<Silk>,
 }
 
 impl Dec {
     fn new() -> Self {
-        Dec { extradata: None }
+        Dec { extradata: None, silk: None }
     }
 }
 
@@ -44,9 +40,24 @@ impl Decoder for Dec {
             self.extradata = Some(Vec::from(extra));
         }
         fn send_packet(&mut self, pkt: &AVPacket) -> Result<()> {
+            let silk = self.silk.as_mut().unwrap();
             let pkt = Packet::from_slice(pkt.data.as_slice())?;
 
             println!("{:?}", pkt);
+
+            if pkt.mode != Mode::CELT {
+                silk.setup(&pkt);
+            }
+
+            for frame in pkt.frames {
+                let mut rd = RangeDecoder::new(frame);
+                println!("Decoding {:?}", frame);
+
+                if pkt.mode != Mode::CELT {
+                    silk.decode(&mut rd)?;
+                }
+            }
+
 
             Ok(())
         }
@@ -82,19 +93,21 @@ impl Decoder for Dec {
                     mapping = &extradata[OPUS_HEAD_SIZE + 2 ..]
                 } else {
                     if channels > 2 || channel_map {
-                        return Err(ErrorKind::InvalidConfiguration.into());
+                        return Err(Error::ConfigurationInvalid);
                     }
                     if channels > 1 {
                         coupled_streams = 1;
                     }
                 }
             } else {
-                return Err(ErrorKind::ConfigurationIncomplete.into());
+                return Err(Error::ConfigurationIncomplete);
             }
 
             if channels > 2 {
                 unimplemented!() // TODO: Support properly channel mapping
             } else {
+                println!("channels {}", channels);
+                self.silk = Some(Silk::new());
                 // self.info.map = ChannelMap::default_map(channels);
             }
 
@@ -125,14 +138,12 @@ mod test {
     use format::demuxer::Context;
     use format::demuxer::Event;
     use format::buffer::*;
-    use std::io::Cursor;
+    use std::fs::File;
+    use std::path::PathBuf;
 
-    static TV01 : &[u8] = include_bytes!("../assets/testvector01.mka");
-
-    #[test]
-    fn parse_packet() {
+    fn parse_packet(sample: &PathBuf) {
         let mut ctx = Context::new(Box::new(MkvDemuxer::new()),
-                                   Box::new(AccReader::new(Cursor::new(TV01))));
+                                   Box::new(AccReader::new(File::open(sample).unwrap())));
         let _ = ctx.read_headers().unwrap();
 
         let mut d = Dec::new();
@@ -151,4 +162,19 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn send_packet() {
+        let p = env!("CARGO_MANIFEST_DIR");
+        println!("{:?}", p);
+        let mut d = PathBuf::from(p);
+        d.push("assets/_");
+        for i in 1..12 {
+            let filename = format!("testvector{:02}.mka", i);
+            d.set_file_name(filename);
+            println!("path {:?}", d);
+            parse_packet(&d);
+        }
+    }
+
 }

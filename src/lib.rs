@@ -12,5 +12,6 @@ extern crate av_format as format;
 
 mod entropy;
 mod packet;
+mod silk;
 pub mod decoder;
 

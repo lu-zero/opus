@@ -3,7 +3,7 @@
 use codec::error::*;
 
 #[derive(Debug, PartialEq, Clone)]
-enum Code {
+pub enum Code {
     Single,
     DoubleEqual,
     DoubleVary,
@@ -11,7 +11,7 @@ enum Code {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Mode {
+pub enum Mode {
     SILK,
     CELT,
     HYBRID,
@@ -20,8 +20,8 @@ enum Mode {
 /// Bandwidth
 ///
 /// See [section-2.1.3](https://tools.ietf.org/html/rfc6716#section-2.1.3)
-#[derive(Debug, PartialEq, Clone)]
-enum Bandwidth {
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+pub enum Bandwidth {
     Narrow = 8000,
     Medium = 12000,
     Wide = 16000,
@@ -33,7 +33,7 @@ enum Bandwidth {
 ///
 /// See [section-2.1.4](https://tools.ietf.org/html/rfc6716#section-2.1.4)
 #[derive(Debug, PartialEq, Clone)]
-enum FrameDuration {
+pub enum FrameDuration {
     /// 2.5ms
     VeryShort = 120,
     /// 5ms
@@ -51,14 +51,14 @@ enum FrameDuration {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Packet<'a> {
     code: Code,
-    stereo: bool,
     vbr: bool,
     config: usize,
-    padding: usize,
-    mode: Mode,
-    bandwidth: Bandwidth,
-    frame_duration: FrameDuration,
-    frames: Vec<&'a [u8]>,
+    pub stereo: bool,
+    pub padding: usize,
+    pub mode: Mode,
+    pub bandwidth: Bandwidth,
+    pub frame_duration: FrameDuration,
+    pub frames: Vec<&'a [u8]>,
 }
 
 fn xiph_lacing_u16(buf: &[u8]) -> Result<(usize, usize)> {
@@ -200,15 +200,15 @@ impl<'a> Packet<'a> {
         };
 
         if buf.len() < 1 {
-            return unimplemented!();
+            unimplemented!();
         }
 
         let code = buf[0] & 0x3;
-        let stereo = (buf[0] >> 2) & 0x01 == 1;
         let config = (buf[0] >> 3) & 0x1f;
+        p.stereo = (buf[0] >> 2) & 0x01 == 1;
 
         if code >= 2 && buf.len() < 1 {
-            return unimplemented!();
+            unimplemented!();
         }
 
         let buf = &buf[1..];
