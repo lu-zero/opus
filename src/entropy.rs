@@ -1,5 +1,5 @@
 use bitstream::bitread::*;
-
+use maths::*;
 little_endian_reader!{ ReverseBitReadLE }
 
 impl<'a> ReverseBitReadLE<'a> {
@@ -102,9 +102,9 @@ pub struct RangeDecoder<'a> {
     total: usize,
 }
 
-pub struct ICDFContext<'a> {
+pub struct ICDFContext {
     pub total: usize,
-    pub dist: &'a [usize],
+    pub dist: &'static [usize],
 }
 
 const SYM_BITS: usize = 8;
@@ -115,17 +115,6 @@ const CODE_SHIFT: usize = CODE_BITS - SYM_BITS - 1;
 const CODE_TOP: usize = 1 << (CODE_BITS - 1);
 const CODE_BOT: usize = CODE_TOP >> SYM_BITS;
 const CODE_EXTRA: usize =  (CODE_BITS - 2) % SYM_BITS + 1;
-
-trait ILog {
-    fn ilog(&self) -> Self;
-}
-
-impl ILog for usize {
-    fn ilog(&self) -> Self {
-        use std::mem::size_of;
-        size_of::<usize>() * 8 - self.leading_zeros() as usize
-    }
-}
 
 impl<'a> RangeDecoder<'a> {
     fn normalize(&mut self) {
@@ -156,7 +145,7 @@ impl<'a> RangeDecoder<'a> {
 
     fn update(&mut self, scale: usize, low: usize, high: usize, total: usize) {
         let s = scale * (total - high);
-        println!("update {} {} {} {} {} -> {}", scale, low, high, total, s, self.value);
+        // println!("update {} {} {} {} {} -> {}", scale, low, high, total, s, self.value);
         self.value -= s;
         self.range = if low != 0 {
             scale * (high - low)
@@ -180,7 +169,7 @@ impl<'a> RangeDecoder<'a> {
     pub fn decode_logp(&mut self, logp: usize) -> bool {
         let scale = self.range >> logp;
 
-        println!("p2 scale {} bits {}", scale, logp);
+        // println!("p2 scale {} bits {}", scale, logp);
         let k  = if scale > self.value {
             self.range = scale;
             true
@@ -202,7 +191,7 @@ impl<'a> RangeDecoder<'a> {
         let k = dist.iter().position(|v| *v > sym).unwrap();
         let high = dist[k];
         let low = if k > 0 { dist[k - 1] } else { 0 };
-        println!("{} {} decode to {}", scale, sym, k);
+        // println!("{} {} decode to {}", scale, sym, k);
         self.update(scale, low, high, total);
 
         k

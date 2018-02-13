@@ -20,7 +20,7 @@ pub enum Mode {
 /// Bandwidth
 ///
 /// See [section-2.1.3](https://tools.ietf.org/html/rfc6716#section-2.1.3)
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
 pub enum Bandwidth {
     Narrow = 8000,
     Medium = 12000,

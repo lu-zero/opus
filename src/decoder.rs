@@ -43,7 +43,7 @@ impl Decoder for Dec {
             let silk = self.silk.as_mut().unwrap();
             let pkt = Packet::from_slice(pkt.data.as_slice())?;
 
-            println!("{:?}", pkt);
+            // println!("{:?}", pkt);
 
             if pkt.mode != Mode::CELT {
                 silk.setup(&pkt);
@@ -51,7 +51,7 @@ impl Decoder for Dec {
 
             for frame in pkt.frames {
                 let mut rd = RangeDecoder::new(frame);
-                println!("Decoding {:?}", frame);
+                // println!("Decoding {:?}", frame);
 
                 if pkt.mode != Mode::CELT {
                     silk.decode(&mut rd)?;
@@ -106,7 +106,7 @@ impl Decoder for Dec {
             if channels > 2 {
                 unimplemented!() // TODO: Support properly channel mapping
             } else {
-                println!("channels {}", channels);
+                // println!("channels {}", channels);
                 self.silk = Some(Silk::new());
                 // self.info.map = ChannelMap::default_map(channels);
             }
@@ -166,10 +166,9 @@ mod test {
     #[test]
     fn send_packet() {
         let p = env!("CARGO_MANIFEST_DIR");
-        println!("{:?}", p);
         let mut d = PathBuf::from(p);
         d.push("assets/_");
-        for i in 1..12 {
+        for i in /*1..12*/ 1..3 {
             let filename = format!("testvector{:02}.mka", i);
             d.set_file_name(filename);
             println!("path {:?}", d);
