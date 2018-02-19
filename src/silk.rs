@@ -6,14 +6,8 @@
 
 use entropy::*;
 use packet::*;
+use maths::*;
 use codec::error::*;
-
-#[derive(Debug, Default)]
-pub struct SilkFrame {
-    frame_type: FrameType,
-    log_gain: isize,
-    coded: bool,
-}
 
 #[derive(Debug)]
 pub struct SilkInfo {
@@ -267,12 +261,12 @@ const LSF_STAGE2_EXTENSION: &ICDFContext = &ICDFContext {
     dist: &[156, 216, 240, 249, 253, 255, 256],
 };
 
-const LSF_PRED_WEIGHT_NB_MB: &[&[usize]] = &[
+const LSF_PRED_WEIGHT_NB_MB: &[&[u8]] = &[
     &[179, 138, 140, 148, 151, 149, 153, 151, 163],
     &[116, 67, 82, 59, 92, 72, 100, 89, 92],
 ];
 
-const LSF_PRED_WEIGHT_WB: &[&[usize]] = &[
+const LSF_PRED_WEIGHT_WB: &[&[u8]] = &[
     &[
         175, 148, 160, 176, 178, 173, 174, 164, 177, 174, 196, 182, 198, 192, 182
     ],
@@ -351,7 +345,7 @@ const LSF_PRED_WEIGHT_INDEX_WB: &[&[usize]] = &[
     &[0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0],
 ];
 
-const LSF_CODEBOOK_NB_MB: &[&[u16]] = &[
+const LSF_CODEBOOK_NB_MB: &[&[u8]] = &[
     &[12, 35, 60, 83, 108, 132, 157, 180, 206, 228],
     &[15, 32, 55, 77, 101, 125, 151, 175, 201, 225],
     &[19, 42, 66, 89, 114, 137, 162, 184, 209, 230],
@@ -386,7 +380,7 @@ const LSF_CODEBOOK_NB_MB: &[&[u16]] = &[
     &[37, 48, 64, 84, 104, 118, 156, 177, 201, 230],
 ];
 
-const LSF_CODEBOOK_WB: &[&[u16]] = &[
+const LSF_CODEBOOK_WB: &[&[u8]] = &[
     &[
         7, 23, 38, 54, 69, 85, 100, 116, 131, 147, 162, 178, 193, 208, 223, 239
     ],
@@ -669,9 +663,29 @@ const LSF_WEIGHT_WB: &[&[u16]] = &[
     ],
 ];
 
-const LSF_MIN_SPACING_NB_MB: &[u16] = &[250, 3, 6, 3, 3, 3, 4, 3, 3, 3, 461];
+const LSF_MIN_SPACING_NB_MB: &[i16] = &[250, 3, 6, 3, 3, 3, 4, 3, 3, 3, 461];
 
-const LSF_MIN_SPACING_WB: &[u16] = &[100, 3, 40, 3, 3, 3, 5, 14, 14, 10, 11, 3, 8, 9, 7, 3, 347];
+const LSF_MIN_SPACING_WB: &[i16] = &[100, 3, 40, 3, 3, 3, 5, 14, 14, 10, 11, 3, 8, 9, 7, 3, 347];
+
+const LSF_INTERPOLATION_INDEX: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[13, 35, 64, 75, 256],
+};
+
+const LSF_ORDERING_NB_MB: &[u8] = &[0, 9, 6, 3, 4, 5, 8, 1, 2, 7];
+const LSF_ORDERING_WB: &[u8] = &[0, 15, 8, 7, 4, 11, 12, 3, 2, 13, 10, 5, 6, 9, 14, 1];
+
+const COSINE: &[i16] = &[
+    4096, 4095, 4091, 4085, 4076, 4065, 4052, 4036, 4017, 3997, 3973, 3948, 3920, 3889, 3857, 3822,
+    3784, 3745, 3703, 3659, 3613, 3564, 3513, 3461, 3406, 3349, 3290, 3229, 3166, 3102, 3035, 2967,
+    2896, 2824, 2751, 2676, 2599, 2520, 2440, 2359, 2276, 2191, 2106, 2019, 1931, 1842, 1751, 1660,
+    1568, 1474, 1380, 1285, 1189, 1093, 995, 897, 799, 700, 601, 501, 401, 301, 201, 101, 0, -101,
+    -201, -301, -401, -501, -601, -700, -799, -897, -995, -1093, -1189, -1285, -1380, -1474, -1568,
+    -1660, -1751, -1842, -1931, -2019, -2106, -2191, -2276, -2359, -2440, -2520, -2599, -2676,
+    -2751, -2824, -2896, -2967, -3035, -3102, -3166, -3229, -3290, -3349, -3406, -3461, -3513,
+    -3564, -3613, -3659, -3703, -3745, -3784, -3822, -3857, -3889, -3920, -3948, -3973, -3997,
+    -4017, -4036, -4052, -4065, -4076, -4085, -4091, -4095, -4096,
+];
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum FrameType {
@@ -718,6 +732,24 @@ impl Log2Lin for isize {
     }
 }
 
+trait ExMath: Into<i64> + Copy {
+    fn mul_shift<I: Into<i64>>(self, other: I, bits: usize) -> i32 {
+        let a: i64 = self.into();
+        let b: i64 = other.into();
+
+        ((a * b) >> bits) as i32
+    }
+
+    fn mul_round<I: Into<i64>>(self, other: I, bits: u64) -> i32 {
+        let a: i64 = self.into();
+        let b: i64 = other.into();
+
+        (((a * b) + (1 << (bits - 1))) >> bits) as i32
+    }
+}
+
+impl ExMath for i32 {}
+
 // TODO: refactor once
 pub trait Band {
     const ORDER: usize;
@@ -725,11 +757,267 @@ pub trait Band {
 
     const STAGE1: &'static [&'static ICDFContext];
     const MAP: &'static [&'static [&'static ICDFContext]];
-    const PRED_WEIGHT: &'static [&'static [usize]];
+    const PRED_WEIGHT: &'static [&'static [u8]];
     const PRED_WEIGHT_INDEX: &'static [&'static [usize]];
     const WEIGHT: &'static [&'static [u16]];
-    const CODEBOOK: &'static [&'static [u16]];
-    const MIN_SPACING: &'static [u16];
+    const CODEBOOK: &'static [&'static [u8]];
+    const MIN_SPACING: &'static [i16];
+    const ORDERING: &'static [u8];
+
+    // TODO: write a proper test for it
+    fn stabilize(nlsfs: &mut [i16]) {
+        for _ in 0..20 {
+            let mut k = 0;
+            let mut min_diff = 0;
+
+            for (i, &spacing) in Self::MIN_SPACING.iter().enumerate() {
+                let low = if i == 0 { 0 } else { nlsfs[i - 1] } as i32;
+                let high = if i == Self::ORDER {
+                    32768
+                } else {
+                    nlsfs[i] as i32
+                };
+                let diff = high - low - spacing as i32;
+
+                if diff < min_diff {
+                    min_diff = diff;
+                    k = i;
+                }
+            }
+
+            if min_diff == 0 {
+                return;
+            }
+
+            if k == 0 {
+                nlsfs[0] = Self::MIN_SPACING[0];
+            } else if k == Self::ORDER {
+                nlsfs[Self::ORDER - 1] = 32760 - Self::MIN_SPACING[Self::ORDER];
+            } else {
+                let half_delta = (Self::MIN_SPACING[k] >> 1) as i16;
+                let min_center = (Self::MIN_SPACING[..k].iter().sum::<i16>() + half_delta) as i32;
+                let max_center =
+                    (32760 - Self::MIN_SPACING[k + 1..].iter().sum::<i16>() - half_delta) as i32;
+                let delta = nlsfs[k - 1] as i32 - nlsfs[k] as i32;
+                let center = (delta >> 1) - (delta & 1);
+
+                nlsfs[k - 1] = center.min(max_center).max(min_center) as i16 - half_delta;
+                nlsfs[k] = nlsfs[k - 1] + Self::MIN_SPACING[k];
+            }
+        }
+
+        nlsfs.sort_unstable();
+
+        let mut prev = 0;
+        for (nlsf, &spacing) in nlsfs.iter_mut().zip(Self::MIN_SPACING) {
+            let v = prev + spacing;
+            if *nlsf < v {
+                *nlsf = v;
+            }
+            prev = *nlsf;
+        }
+
+        let mut next = 32768;
+        for (nlsf, &spacing) in nlsfs.iter_mut().zip(&Self::MIN_SPACING[1..]).rev() {
+            let v = next - spacing as i32;
+            if *nlsf as i32 > v {
+                *nlsf = v as i16;
+            }
+            next = *nlsf as i32;
+        }
+    }
+
+    fn is_stable(lpcs: &[i16]) -> bool {
+        let mut dc_resp = 0;
+        let mut even = vec![0; Self::ORDER];
+        let mut odd = vec![0; Self::ORDER];
+        let mut invgain = 1 << 30;
+
+        for (c, &lpc) in even.iter_mut().zip(lpcs.iter()) {
+            let l = lpc as i32;
+            dc_resp += l;
+            *c = l * 4096;
+        }
+
+        if dc_resp > 4096 {
+            return false;
+        }
+
+        let mut k = Self::ORDER - 1;
+        let mut a = even[k];
+
+        loop {
+            if a.abs() > 16773022 {
+                return false;
+            }
+
+            let rc = -a * 128;
+            let div = (1 << 30) - rc.mul_shift(rc, 32);
+
+            invgain = invgain.mul_shift(div, 32) << 2;
+
+            if k == 0 {
+                return invgain >= 107374;
+            }
+
+            let b1 = div.ilog();
+            let b2 = b1 - 16;
+            let inv = ((1 << 29) - 1) / (div >> (b2 + 1));
+            let err = (1 << 29) - (div << (15 - b2)).mul_shift(inv, 16);
+            let gain = (inv << 16) + (err * inv >> 13);
+
+            let (prev, cur) = if k & 1 != 0 {
+                (&mut even, &mut odd)
+            } else {
+                (&mut odd, &mut even)
+            };
+
+            for j in 0..k {
+                let v = prev[j] - prev[k - j - 1].mul_shift(rc, 31);
+                cur[j] = v.mul_shift(gain, b1 as usize);
+            }
+
+            k -= 1;
+
+            a = cur[k];
+        }
+    }
+
+    fn range_limit(lpcs: &mut [f32], a: &mut [i32]) {
+        let mut lpc = vec![0; Self::ORDER];
+        let mut deadline = true;
+        for _ in 0..10 {
+            // max_by() returns the last maximum the spec requires
+            // the first.
+            let (k, &maxabs) = a.iter()
+                .enumerate()
+                .rev()
+                .max_by_key(|&(_i, v)| v.abs())
+                .unwrap();
+
+            let maxabs = (maxabs.abs() + (1 << 4)) >> 5;
+
+            if maxabs > 32767 {
+                let max = maxabs.max(163838);
+                let start = 65470 - ((max - 32767) << 14) / ((max * (k as i32 + 1)) >> 2);
+                let mut chirp = start;
+
+                for v in a.iter_mut() {
+                    *v = v.mul_round(chirp, 16);
+                    chirp = (start * chirp + 32768) >> 16;
+                }
+            } else {
+                deadline = false;
+                break;
+            }
+        }
+
+        if deadline {
+            for (v, l) in a.iter_mut().zip(lpc.iter_mut()) {
+                let v16 = ((*v + 16) >> 5)
+                    .min(i16::max_value() as i32)
+                    .max(i16::min_value() as i32);
+                *l = v16 as i16;
+                *v = v16 << 5;
+            }
+        } else {
+            for (&v, l) in a.iter().zip(lpc.iter_mut()) {
+                *l = ((v + 16) >> 5) as i16;
+            }
+        }
+
+        for i in 1..16 + 1 {
+            if Self::is_stable(&lpc) {
+                break;
+            }
+            let start = 65536u32 - (1 << i);
+            let mut chirp = start;
+
+            for (v, l) in a.iter_mut().zip(lpc.iter_mut()) {
+                *v = v.mul_round(chirp, 16);
+                *l = ((*v + (1 << 4)) >> 5) as i16;
+
+                chirp = (start * chirp + 32768) >> 16;
+            }
+        }
+
+        for (d, &l) in lpcs.iter_mut().zip(lpc.iter()) {
+            *d = (l as f32) / 4096f32;
+        }
+    }
+
+    fn lsf_to_lpc<'a, I>(lpcs: &'a mut [f32], nlsfs: I)
+    where
+        I: IntoIterator<Item = i16>,
+    {
+        let mut lsps = vec![0; Self::ORDER];
+        let mut p = vec![0; Self::ORDER / 2 + 1];
+        let mut q = vec![0; Self::ORDER / 2 + 1];
+
+        for (&ord, nlsf) in Self::ORDERING.iter().zip(nlsfs) {
+            let idx = (nlsf >> 8) as usize;
+            let off = (nlsf & 255) as i32;
+
+            let cos = COSINE[idx] as i32;
+            let next_cos = COSINE[idx + 1] as i32;
+
+            lsps[ord as usize] = (cos * 256 + (next_cos - cos) * off + 4) >> 3;
+        }
+
+        p[0] = 65536;
+        q[0] = 65536;
+        p[1] = -lsps[0];
+        q[1] = -lsps[1];
+
+        println!("{:#?}", lsps);
+        // TODO: fuse p and q as even/odd and zip it
+        for (i, lsp) in lsps[2..].chunks(2).enumerate() {
+            p[i + 2] = p[i] * 2 - lsp[0].mul_round(p[i + 1], 16);
+            println!(
+                "[{}] {} = {} * 2 - {} * {}",
+                i + 2,
+                p[i + 2],
+                p[i],
+                lsp[0],
+                p[i + 1]
+            );
+            q[i + 2] = q[i] * 2 - lsp[1].mul_round(q[i + 1], 16);
+
+            // TODO: benchmark let mut w = &p[j-2..j+1]
+            // would be p[0..i+1].windows_mut(3).rev()
+            for j in (2..i + 2).rev() {
+                let v = p[j - 2] - lsp[0].mul_round(p[j - 1], 16);
+                p[j] += v;
+                println!(" [{}] {} = {} - {} * {}", j, v, p[j - 2], lsp[0], p[j - 1]);
+                q[j] += q[j - 2] - lsp[1].mul_round(q[j - 1], 16);
+            }
+
+            p[1] -= lsp[0];
+            q[1] -= lsp[1];
+        }
+
+        println!("{:#?}", p);
+        println!("{:#?}", q);
+
+        let mut a = vec![0; Self::ORDER];
+        {
+            let (a0, a1) = a.split_at_mut(Self::ORDER / 2);
+            let it = a0.iter_mut().zip(a1.iter_mut().rev());
+            let co = p.windows(2).zip(q.windows(2));
+            for ((v0, v1), (pv, qv)) in it.zip(co) {
+                let ps = pv[0] + pv[1];
+                println!("{} = {} + {}", ps, pv[0], pv[1]);
+                let qs = qv[1] - qv[0];
+                //                println!("{} = {} + {}", qs, qv[0], qv[1]);
+                *v0 = -ps - qs;
+                *v1 = -ps + qs;
+            }
+        }
+
+        println!("{:#?}", a);
+
+        Self::range_limit(lpcs, &mut a);
+    }
 }
 
 pub struct NB_MB;
@@ -741,11 +1029,12 @@ impl Band for NB_MB {
 
     const STAGE1: &'static [&'static ICDFContext] = LSF_STAGE1_NB_MB;
     const MAP: &'static [&'static [&'static ICDFContext]] = LSF_MAP_NB_MB;
-    const PRED_WEIGHT: &'static [&'static [usize]] = LSF_PRED_WEIGHT_NB_MB;
+    const PRED_WEIGHT: &'static [&'static [u8]] = LSF_PRED_WEIGHT_NB_MB;
     const PRED_WEIGHT_INDEX: &'static [&'static [usize]] = LSF_PRED_WEIGHT_INDEX_NB_MB;
     const WEIGHT: &'static [&'static [u16]] = LSF_WEIGHT_NB_MB;
-    const CODEBOOK: &'static [&'static [u16]] = LSF_CODEBOOK_NB_MB;
-    const MIN_SPACING: &'static [u16] = LSF_MIN_SPACING_NB_MB;
+    const CODEBOOK: &'static [&'static [u8]] = LSF_CODEBOOK_NB_MB;
+    const MIN_SPACING: &'static [i16] = LSF_MIN_SPACING_NB_MB;
+    const ORDERING: &'static [u8] = LSF_ORDERING_NB_MB;
 }
 
 impl Band for WB {
@@ -753,12 +1042,23 @@ impl Band for WB {
     const STEP: i32 = 9830;
 
     const STAGE1: &'static [&'static ICDFContext] = LSF_STAGE1_WB;
-    const MAP: &'static[&'static[&'static ICDFContext]] = LSF_MAP_WB;
-    const PRED_WEIGHT: &'static [&'static [usize]] = LSF_PRED_WEIGHT_WB;
+    const MAP: &'static [&'static [&'static ICDFContext]] = LSF_MAP_WB;
+    const PRED_WEIGHT: &'static [&'static [u8]] = LSF_PRED_WEIGHT_WB;
     const PRED_WEIGHT_INDEX: &'static [&'static [usize]] = LSF_PRED_WEIGHT_INDEX_WB;
     const WEIGHT: &'static [&'static [u16]] = LSF_WEIGHT_WB;
-    const CODEBOOK: &'static [&'static [u16]] = LSF_CODEBOOK_WB;
-    const MIN_SPACING: &'static [u16] = LSF_MIN_SPACING_WB;
+    const CODEBOOK: &'static [&'static [u8]] = LSF_CODEBOOK_WB;
+    const MIN_SPACING: &'static [i16] = LSF_MIN_SPACING_WB;
+    const ORDERING: &'static [u8] = LSF_ORDERING_WB;
+}
+
+#[derive(Debug, Default)]
+pub struct SilkFrame {
+    frame_type: FrameType,
+    log_gain: isize,
+    coded: bool,
+    nlsfs: [i16; 16],
+    lpc: [f32; 16],
+    interpolated_lpc: [f32; 16],
 }
 
 impl SilkFrame {
@@ -782,7 +1082,7 @@ impl SilkFrame {
         log_gain.log2lin() as f32 / 65536.0f32
     }
 
-    fn parse_lpc<B: Band>(&mut self, rd: &mut RangeDecoder) -> usize {
+    fn parse_lpc<B: Band>(&mut self, rd: &mut RangeDecoder, interpolate: bool) {
         /* TODO: use this once rust supports that
         let mut res = [0; B::ORDER];
         let mut lsfs_s2 = [0; B::ORDER];
@@ -793,15 +1093,14 @@ impl SilkFrame {
         let lsf_s1 = rd.decode_icdf(B::STAGE1[idx]);
 
         // TODO: store in the Band trait
-        let (map, step, weight_map, weight_map_index, weights, codebooks, spacings) =
-            (   B::MAP[lsf_s1],
-                B::STEP,
-                B::PRED_WEIGHT,
-                B::PRED_WEIGHT_INDEX[lsf_s1],
-                B::WEIGHT[lsf_s1],
-                B::CODEBOOK[lsf_s1],
-                B::MIN_SPACING,
-            );
+        let (map, step, weight_map, weight_map_index, weights, codebooks) = (
+            B::MAP[lsf_s1],
+            B::STEP,
+            B::PRED_WEIGHT,
+            B::PRED_WEIGHT_INDEX[lsf_s1],
+            B::WEIGHT[lsf_s1],
+            B::CODEBOOK[lsf_s1],
+        );
         /*
         if wb {
             println!("wb");
@@ -841,20 +1140,20 @@ impl SilkFrame {
 
         let lsfs_s2 = map.iter()
             .map(|icdf| {
-                let lsf = rd.decode_icdf(icdf) as i32 - 4;
+                let lsf = rd.decode_icdf(icdf) as i8 - 4;
                 if lsf == -4 {
-                    lsf - rd.decode_icdf(LSF_STAGE2_EXTENSION) as i32
+                    lsf - rd.decode_icdf(LSF_STAGE2_EXTENSION) as i8
                 } else if lsf == 4 {
-                    lsf + rd.decode_icdf(LSF_STAGE2_EXTENSION) as i32
+                    lsf + rd.decode_icdf(LSF_STAGE2_EXTENSION) as i8
                 } else {
                     lsf
                 }
             })
-            .collect::<Vec<i32>>();
+            .collect::<Vec<i8>>();
 
         println!("lsfs2_s2 {:?}", lsfs_s2);
 
-        let dequant_step = |lsf_s2: i32| -> i32 {
+        let dequant_step = |lsf_s2: i16| -> i16 {
             let fix = if lsf_s2 < 0 {
                 102
             } else if lsf_s2 > 0 {
@@ -863,25 +1162,10 @@ impl SilkFrame {
                 0
             };
 
-            ((lsf_s2 * 1024 + fix) * step) >> 16
+            (((lsf_s2 as i32 * 1024 + fix) * step) >> 16) as i16
         };
 
         let mut prev = None;
-        /*
-        for (i, (mut res, lsf_s2)) in res.iter_mut().zip(lsfs_s2.iter()).enumerate().rev() {
-            let r = dequant_step(*lsf_s2);
-
-            *res = r + if let Some(p) = prev {
-                let weight = weight_map[weight_map_index[i]][i] as isize;
-
-                (p * weight) >> 8
-            } else {
-                0
-            };
-
-            prev = Some(*res);
-            println!("res {}", *res);
-        } */
 
         // TODO: reverse codebooks and weights to avoid the collect?
         let residuals = lsfs_s2
@@ -889,10 +1173,10 @@ impl SilkFrame {
             .enumerate()
             .rev()
             .map(|(i, lsf_s2)| {
-                let ds = dequant_step(*lsf_s2);
+                let ds = dequant_step(*lsf_s2 as i16);
 
                 let res = ds + if let Some(p) = prev {
-                    let weight = weight_map[weight_map_index[i]][i] as i32;
+                    let weight = weight_map[weight_map_index[i]][i] as i16;
 
                     (p * weight) >> 8
                 } else {
@@ -903,7 +1187,7 @@ impl SilkFrame {
 
                 res
             })
-            .collect::<Vec<i32>>();
+            .collect::<Vec<i16>>();
 
         println!("residuals {:#?}", residuals);
 
@@ -913,55 +1197,39 @@ impl SilkFrame {
             .zip(codebooks)
             .zip(weights)
             .map(|((&r, &c), &w)| {
-                let nlsf = ((c as i32) << 7) + (r << 14) / w as i32;
+                let nlsf = ((c as i32) << 7) + ((r as i32) << 14) / (w as i32);
 
-                nlsf.max(0).min(1 << 15)
-            }).collect::<Vec<i32>>();
+                nlsf.max(0).min(1 << 15) as i16
+            })
+            .collect::<Vec<i16>>();
 
         println!("nlsf {:#?}", nlsfs);
 
         // Damage control
+        B::stabilize(&mut nlsfs);
 
-        for pass in 0..20 {
-            let mut k = 0;
-            let mut min_diff = 0;
-
-            for (i, &spacing) in spacings.iter().enumerate() {
-                let low = if i == 0 { 0 } else { nlsfs[i - 1] };
-                let high = if i == B::ORDER { 32768 } else { nlsfs[i] };
-                let diff = high - low - spacing as i32;
-
-                if diff < min_diff {
-                    min_diff = diff;
-                    k = i;
+        if interpolate {
+            let weight = rd.decode_icdf(LSF_INTERPOLATION_INDEX) as i16;
+            if weight != 4 && self.coded {
+                if weight != 0 {
+                    let interpolated_nlsfs = nlsfs
+                        .iter()
+                        .zip(&self.nlsfs)
+                        .map(|(&nlsf, &prev)| prev + ((nlsf - prev) * weight) >> 2);
+                    B::lsf_to_lpc(&mut self.interpolated_lpc, interpolated_nlsfs);
+                } else {
+                    (&mut self.interpolated_lpc[..B::ORDER]).copy_from_slice(&self.lpc[..B::ORDER]);
                 }
             }
-
-            if min_diff == 0 {
-                break;
-            }
-
-            if k == 0 {
-                nlsfs[0] = spacings[0] as i32;
-            } else if k == B::ORDER {
-                nlsfs[B::ORDER - 1] = 32760 - spacings[B::ORDER] as i32;
-            } else {
-                let half_delta = (spacings[k] >> 1) as i32;
-                let min_center = spacings[..k].iter().sum::<u16>() as i32 + half_delta;
-                let max_center = 32760 - spacings[k + 1..].iter().sum::<u16>() as i32 - half_delta;
-                let delta = nlsfs[k - 1] - nlsfs[k];
-                let center = (delta >> 1) - (delta & 1);
-
-                nlsfs[k - 1] = center.min(max_center).max(min_center) as i32 - half_delta;
-                nlsfs[k] = nlsfs[k - 1] + spacings[k] as i32;
-            }
-
-
         }
 
-        unreachable!();
+        (&mut self.nlsfs[..B::ORDER]).copy_from_slice(&nlsfs);
 
-        0
+        B::lsf_to_lpc(&mut self.lpc, nlsfs);
+
+        println!("lpc {:#?}", self.lpc);
+
+        unreachable!();
     }
 
     fn parse(
@@ -998,9 +1266,9 @@ impl SilkFrame {
         }
 
         if info.bandwidth > Bandwidth::Medium {
-            self.parse_lpc::<WB>(rd);
+            self.parse_lpc::<WB>(rd, info.subframes == 4);
         } else {
-            self.parse_lpc::<NB_MB>(rd);
+            self.parse_lpc::<NB_MB>(rd, info.subframes == 4);
         }
 
         Ok(())
@@ -1114,10 +1382,10 @@ impl Silk {
                 false
             };
 
-            self.mid_frame.parse(rd, &self.info, mid_vad[i], i == 0)?;
+            self.mid_frame.parse(rd, &self.info, mid_vad[i], coded)?;
 
             if self.stereo && !midonly {
-                self.side_frame.parse(rd, &self.info, side_vad[i], i == 0)?;
+                self.side_frame.parse(rd, &self.info, side_vad[i], coded)?;
             }
         }
 
@@ -1130,7 +1398,6 @@ mod test {
     use super::*;
 
     #[test]
-
     fn decode() {
         let mut p = Packet::from_slice(&[
             12, 9, 178, 70, 140, 148, 202, 129, 225, 86, 64, 234, 160
@@ -1145,5 +1412,30 @@ mod test {
 
             silk.decode(&mut rd);
         }
+    }
+
+    #[test]
+    fn lsf_to_lpc() {
+        let lsf = vec![
+            321i16, 2471, 5904, 9856, 12928, 16000, 19328, 22400, 25728, 28800
+        ];
+        let mut lpc = [0.0; 10];
+
+        let mut reference = [
+            1.2307129,
+            -0.30419922,
+            0.24829102,
+            -0.14990234,
+            0.10522461,
+            -0.13671875,
+            0.031982422,
+            -0.0871582,
+            0.06933594,
+            -0.011230469,
+        ];
+
+        NB_MB::lsf_to_lpc(&mut lpc, lsf);
+
+        assert_eq!(lpc, reference);
     }
 }
