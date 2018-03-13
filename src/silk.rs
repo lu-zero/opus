@@ -33,6 +33,8 @@ pub struct Silk {
 #[derive(Debug, Default)]
 struct SubFrame {
     gain: f32,
+    pitch_lag: i32,
+    ltp_taps: [f32; 5],
 }
 
 const STAGE1: &ICDFContext = &ICDFContext {
@@ -687,35 +689,50 @@ const COSINE: &[i16] = &[
     -4017, -4036, -4052, -4065, -4076, -4085, -4091, -4095, -4096,
 ];
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum FrameType {
-    InactiveLow = 0b00,
-    InactiveHigh = 0b01,
-    UnvoicedLow = 0b10,
-    UnvoicedHigh = 0b11,
-    VoicedLow = 0b100,
-    VoicedHigh = 0b101,
+const PITCH_DELTA: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[
+        46, 48, 50, 53, 57, 63, 73, 88, 114, 152, 182, 204, 219, 229, 236, 242, 246, 250, 252, 254,
+        256,
+    ],
+};
+
+#[derive(Default, Debug, PartialEq, Clone, Copy)]
+struct FrameType {
+    active: bool,
+    voiced: bool,
+    high: bool,
 }
 
+/*
+    InactiveLow  = 0b000,
+    InactiveHigh = 0b001,
+    UnvoicedLow  = 0b010,
+    UnvoicedHigh = 0b011,
+    VoicedLow    = 0b100,
+    VoicedHigh   = 0b101,
+*/
+
+/*
 impl Default for FrameType {
     fn default() -> Self {
         FrameType::VoicedLow
     }
 }
+*/
 
 impl FrameType {
     #[inline(always)]
     fn voiced_index(&self) -> usize {
-        *self as usize >> 2
+        self.voiced as usize
     }
     #[inline(always)]
     fn signal_type_index(&self) -> usize {
-        *self as usize >> 1
+        (self.voiced as usize) + (self.active as usize)
     }
-
     #[inline(always)]
     fn qoffset_type_index(&self) -> usize {
-        *self as usize & 0b001
+        self.high as usize
     }
 }
 
@@ -1020,8 +1037,22 @@ pub trait Band {
     }
 }
 
+trait PitchLag {
+    const LOW_PART: &'static ICDFContext;
+
+    const MIN_LAG: u16;
+    const MAX_LAG: u16;
+
+    const SCALE: u16;
+
+    const OFFSET: &'static [&'static [&'static [i8]]];
+    const CONTOUR: &'static [&'static ICDFContext];
+}
+
 pub struct NB_MB;
 pub struct WB;
+pub struct MB;
+pub struct NB;
 
 impl Band for NB_MB {
     const ORDER: usize = 10;
@@ -1051,14 +1082,476 @@ impl Band for WB {
     const ORDERING: &'static [u8] = LSF_ORDERING_WB;
 }
 
+const PITCH_HIGH_PART: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[3,   6,  12,  23,  44,  74, 106, 125, 136, 146, 158, 171, 184, 196, 207,
+    216, 224, 231, 237, 241, 243, 245, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256]
+};
+
+const PITCH_OFFSET_NB: &[&[&[i8]]] = &[
+    &[&[0, 0], &[1, 0], &[0, 1]],
+    &[
+        &[0, 0, 0, 0],
+        &[2, 1, 0, -1],
+        &[-1, 0, 1, 2],
+        &[-1, 0, 0, 1],
+        &[-1, 0, 0, 0],
+        &[0, 0, 0, 1],
+        &[0, 0, 1, 1],
+        &[1, 1, 0, 0],
+        &[1, 0, 0, 0],
+        &[0, 0, 0, -1],
+        &[1, 0, 0, -1],
+    ],
+];
+
+const PITCH_CONTOUR_NB: &[&ICDFContext] = &[
+    &ICDFContext {
+        total: 256,
+        dist: &[143, 193, 256],
+    },
+    &ICDFContext {
+        total: 256,
+        dist: &[68, 80, 101, 118, 137, 159, 189, 213, 230, 246, 256],
+    },
+];
+
+const PITCH_OFFSET_MB_WB: &[&[&[i8]]] = &[
+    &[
+        &[0, 0],
+        &[0, 1],
+        &[1, 0],
+        &[-1, 1],
+        &[1, -1],
+        &[-1, 2],
+        &[2, -1],
+        &[-2, 2],
+        &[2, -2],
+        &[-2, 3],
+        &[3, -2],
+        &[-3, 3],
+    ],
+    &[
+        &[0, 0, 0, 0],
+        &[0, 0, 1, 1],
+        &[1, 1, 0, 0],
+        &[-1, 0, 0, 0],
+        &[0, 0, 0, 1],
+        &[1, 0, 0, 0],
+        &[-1, 0, 0, 1],
+        &[0, 0, 0, -1],
+        &[-1, 0, 1, 2],
+        &[1, 0, 0, -1],
+        &[-2, -1, 1, 2],
+        &[2, 1, 0, -1],
+        &[-2, 0, 0, 2],
+        &[-2, 0, 1, 3],
+        &[2, 1, -1, -2],
+        &[-3, -1, 1, 3],
+        &[2, 0, 0, -2],
+        &[3, 1, 0, -2],
+        &[-3, -1, 2, 4],
+        &[-4, -1, 1, 4],
+        &[3, 1, -1, -3],
+        &[-4, -1, 2, 5],
+        &[4, 2, -1, -3],
+        &[4, 1, -1, -4],
+        &[-5, -1, 2, 6],
+        &[5, 2, -1, -4],
+        &[-6, -2, 2, 6],
+        &[-5, -2, 2, 5],
+        &[6, 2, -1, -5],
+        &[-7, -2, 3, 8],
+        &[6, 2, -2, -6],
+        &[5, 2, -2, -5],
+        &[8, 3, -2, -7],
+        &[-9, -3, 3, 9],
+    ],
+];
+
+const PITCH_CONTOUR_MB_WB: &[&ICDFContext] = &[
+    &ICDFContext {
+        total: 256,
+        dist: &[91, 137, 176, 195, 209, 221, 229, 236, 242, 247, 252, 256],
+    },
+    &ICDFContext {
+        total: 256,
+        dist: &[
+            33, 55, 73, 89, 104, 118, 132, 145, 158, 168, 177, 186, 194, 200, 206, 212, 217, 221,
+            225, 229, 232, 235, 238, 240, 242, 244, 246, 248, 250, 252, 253, 254, 255, 256,
+        ],
+    },
+];
+
+impl PitchLag for NB {
+    const LOW_PART: &'static ICDFContext = &ICDFContext {
+        total: 256,
+        dist: &[64, 128, 192, 256],
+    };
+
+    const MIN_LAG: u16 = 16;
+    const MAX_LAG: u16 = 144;
+
+    const SCALE: u16 = 4;
+
+    const OFFSET: &'static [&'static [&'static [i8]]] = PITCH_OFFSET_NB;
+    const CONTOUR: &'static [&'static ICDFContext] = PITCH_CONTOUR_NB;
+}
+
+impl PitchLag for MB {
+    const LOW_PART: &'static ICDFContext = &ICDFContext {
+        total: 256,
+        dist: &[43, 85, 128, 171, 213, 256],
+    };
+
+    const MIN_LAG: u16 = 24;
+    const MAX_LAG: u16 = 216;
+
+    const SCALE: u16 = 6;
+
+    const OFFSET: &'static [&'static [&'static [i8]]] = PITCH_OFFSET_MB_WB;
+    const CONTOUR: &'static [&'static ICDFContext] = PITCH_CONTOUR_MB_WB;
+}
+
+impl PitchLag for WB {
+    const LOW_PART: &'static ICDFContext = &ICDFContext {
+        total: 256,
+        dist: &[32, 64, 96, 128, 160, 192, 224, 256],
+    };
+
+    const MIN_LAG: u16 = 32;
+    const MAX_LAG: u16 = 288;
+
+    const SCALE: u16 = 8;
+
+    const OFFSET: &'static [&'static [&'static [i8]]] = PITCH_OFFSET_MB_WB;
+    const CONTOUR: &'static [&'static ICDFContext] = PITCH_CONTOUR_MB_WB;
+}
+
+const LTP_PERIODICITY: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[77, 157, 256],
+};
+
+const LTP_FILTER: &[&ICDFContext] = &[
+    &ICDFContext {
+        total: 256,
+        dist: &[185, 200, 213, 226, 235, 244, 250, 256],
+    },
+    &ICDFContext {
+        total: 256,
+        dist: &[57,  91, 112, 132, 147, 160, 172, 185, 195, 205, 214, 224, 233, 241, 248, 256],
+    },
+    &ICDFContext {
+        total: 256,
+        dist: &[15,  31,  45,  57,  69,  81,  92, 103, 114, 124, 133, 142, 151, 160, 168,
+    176, 184, 192, 199, 206, 212, 218, 223, 227, 232, 236, 240, 244, 247, 251, 254, 256]
+    },
+];
+
+const LTP_TAPS: &[&[&[i8]]] = &[
+    &[
+        &[  4,   6,  24,   7,   5],
+        &[  0,   0,   2,   0,   0],
+        &[ 12,  28,  41,  13,  -4],
+        &[ -9,  15,  42,  25,  14],
+        &[  1,  -2,  62,  41,  -9],
+        &[-10,  37,  65,  -4,   3],
+        &[ -6,   4,  66,   7,  -8],
+        &[ 16,  14,  38,  -3,  33],
+    ],
+    &[
+        &[ 13,  22,  39,  23,  12],
+        &[ -1,  36,  64,  27,  -6],
+        &[ -7,  10,  55,  43,  17],
+        &[  1,   1,   8,   1,   1],
+        &[  6, -11,  74,  53,  -9],
+        &[-12,  55,  76, -12,   8],
+        &[ -3,   3,  93,  27,  -4],
+        &[ 26,  39,  59,   3,  -8],
+        &[  2,   0,  77,  11,   9],
+        &[ -8,  22,  44,  -6,   7],
+        &[ 40,   9,  26,   3,   9],
+        &[ -7,  20, 101,  -7,   4],
+        &[  3,  -8,  42,  26,   0],
+        &[-15,  33,  68,   2,  23],
+        &[ -2,  55,  46,  -2,  15],
+        &[  3,  -1,  21,  16,  41],
+    ],
+    &[
+        &[ -6,  27,  61,  39,   5],
+        &[-11,  42,  88,   4,   1],
+        &[ -2,  60,  65,   6,  -4],
+        &[ -1,  -5,  73,  56,   1],
+        &[ -9,  19,  94,  29,  -9],
+        &[  0,  12,  99,   6,   4],
+        &[  8, -19, 102,  46, -13],
+        &[  3,   2,  13,   3,   2],
+        &[  9, -21,  84,  72, -18],
+        &[-11,  46, 104, -22,   8],
+        &[ 18,  38,  48,  23,   0],
+        &[-16,  70,  83, -21,  11],
+        &[  5, -11, 117,  22,  -8],
+        &[ -6,  23, 117, -12,   3],
+        &[  3,  -8,  95,  28,   4],
+        &[-10,  15,  77,  60, -15],
+        &[ -1,   4, 124,   2,  -4],
+        &[  3,  38,  84,  24, -25],
+        &[  2,  13,  42,  13,  31],
+        &[ 21,  -4,  56,  46,  -1],
+        &[ -1,  35,  79, -13,  19],
+        &[ -7,  65,  88,  -9, -14],
+        &[ 20,   4,  81,  49, -29],
+        &[ 20,   0,  75,   3, -17],
+        &[  5,  -9,  44,  92,  -8],
+        &[  1,  -3,  22,  69,  31],
+        &[ -6,  95,  41, -12,   5],
+        &[ 39,  67,  16,  -4,   1],
+        &[  0,  -6, 120,  55, -36],
+        &[-13,  44, 122,   4, -24],
+        &[ 81,   5,  11,   3,   7],
+        &[  2,   0,   9,  10,  88]
+    ]
+];
+
+const LTP_SCALE: &[u16] = &[15565, 12288, 8192];
+
+const LTP_SCALE_INDEX: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[128, 192, 256]
+};
+
+const LTP_ORDER: usize = 5;
+const RES_HISTORY: usize = 288 + LTP_ORDER / 2;
+const LPC_HISTORY: usize = 322;
+
+const LCG_SEED: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[64, 128, 192, 256]
+};
+
+trait ShellBlock {
+    const SHELL_BLOCKS: &'static [u8];
+}
+
+impl ShellBlock for NB {
+    const SHELL_BLOCKS: &'static [u8] = &[ 5, 10 ];
+}
+
+impl ShellBlock for MB {
+    const SHELL_BLOCKS: &'static [u8] = &[ 8, 15 ];
+}
+
+
+impl ShellBlock for WB {
+    const SHELL_BLOCKS: &'static [u8] = &[ 10, 20 ];
+}
+
+const EXC_RATE: &[&ICDFContext] = &[
+    &ICDFContext {
+        total: 256,
+        dist: &[ 15,  66,  78, 124, 169, 182, 215, 242, 256 ],
+    },
+    &ICDFContext {
+        total: 256,
+        dist: &[ 33,  63,  99, 116, 150, 199, 217, 238, 256 ],
+    }
+];
+
+const PULSE_COUNT: &[&ICDFContext] = &[
+     &ICDFContext {
+total: 256, dist: &[ 131, 205, 230, 238, 241, 244, 245, 246,
+      247, 248, 249, 250, 251, 252, 253, 254, 255, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[  58, 151, 211, 234, 241, 244, 245, 246,
+      247, 248, 249, 250, 251, 252, 253, 254, 255, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[  43,  94, 140, 173, 197, 213, 224, 232,
+      238, 241, 244, 247, 249, 250, 251, 253, 254, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[  17,  69, 140, 197, 228, 240, 245, 246,
+      247, 248, 249, 250, 251, 252, 253, 254, 255, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   6,  27,  68, 121, 170, 205, 226, 237,
+      243, 246, 248, 250, 251, 252, 253, 254, 255, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   7,  21,  43,  71, 100, 128, 153, 173,
+      190, 203, 214, 223, 230, 235, 239, 243, 246, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   2,   7,  21,  50,  92, 138, 179, 210,
+      229, 240, 246, 249, 251, 252, 253, 254, 255, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   1,   3,   7,  17,  36,  65, 100, 137,
+      171, 199, 219, 233, 241, 246, 250, 252, 254, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   1,   3,   5,  10,  19,  33,  53,  77,
+      104, 132, 158, 181, 201, 216, 227, 235, 241, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   1,   2,   3,   9,  36,  94, 150, 189,
+      214, 228, 238, 244, 247, 250, 252, 253, 254, 256 ], },
+     &ICDFContext {
+total: 256, dist: &[   2,   3,   9,  36,  94, 150, 189, 214,
+      228, 238, 244, 247, 250, 252, 253, 254, 256, 256 ], }
+];
+
+const PULSE_LOCATION: &[&[&ICDFContext]] = &[
+    &[
+        &ICDFContext { total: 256, dist: &[ 126, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 56, 198, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 25, 126, 230, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 12, 72, 180, 244, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 7, 42, 126, 213, 250, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 4, 24, 83, 169, 232, 253, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 15, 53, 125, 200, 242, 254, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 2, 10, 35, 89, 162, 221, 248, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 2, 7, 24, 63, 126, 191, 233, 251, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 5, 17, 45, 94, 157, 211, 241, 252, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 5, 13, 33, 70, 125, 182, 223, 245, 253, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 4, 11, 26, 54, 98, 151, 199, 232, 248, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 3, 9, 21, 42, 77, 124, 172, 212, 237, 249, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 6, 16, 33, 60, 97, 144, 187, 220, 241, 250, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 3, 11, 25, 47, 80, 120, 163, 201, 229, 245, 253, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 3, 4, 17, 35, 62, 98, 139, 180, 214, 238, 252, 253, 254, 255, 256 ], },
+    ],
+    &[
+        &ICDFContext { total: 256, dist: &[ 127, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 53, 202, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 22, 127, 233, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 11, 72, 183, 246, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 6, 41, 127, 215, 251, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 4, 24, 83, 170, 232, 253, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 16, 56, 127, 200, 241, 254, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 12, 39, 92, 162, 218, 246, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 11, 30, 67, 124, 185, 229, 249, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 10, 25, 53, 97, 151, 200, 233, 250, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 8, 21, 43, 77, 123, 171, 209, 237, 251, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 13, 35, 62, 97, 139, 186, 219, 244, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 8, 22, 48, 85, 128, 171, 208, 234, 248, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 6, 16, 36, 67, 107, 149, 189, 220, 240, 250, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 5, 13, 29, 55, 90, 128, 166, 201, 227, 243, 251, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 4, 10, 22, 43, 73, 109, 147, 183, 213, 234, 246, 252, 254, 255, 256 ], },
+    ],
+    &[
+        &ICDFContext { total: 256, dist: &[ 127, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 49, 206, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 20, 127, 236, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 11, 71, 184, 246, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 7, 43, 127, 214, 250, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 6, 30, 87, 169, 229, 252, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 5, 23, 62, 126, 194, 236, 252, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 6, 20, 49, 96, 157, 209, 239, 253, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 16, 39, 74, 125, 175, 215, 245, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 23, 55, 97, 149, 195, 236, 254, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 7, 23, 50, 86, 128, 170, 206, 233, 249, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 6, 18, 39, 70, 108, 148, 186, 217, 238, 250, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 4, 13, 30, 56, 90, 128, 166, 200, 226, 243, 252, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 4, 11, 25, 47, 76, 110, 146, 180, 209, 231, 245, 252, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 3, 8, 19, 37, 62, 93, 128, 163, 194, 219, 237, 248, 253, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 2, 6, 15, 30, 51, 79, 111, 145, 177, 205, 226, 241, 250, 254, 255, 256 ], },
+    ],
+    &[
+        &ICDFContext { total: 256, dist: &[ 128, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 42, 214, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 21, 128, 235, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 12, 72, 184, 245, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 8, 42, 128, 214, 249, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 8, 31, 86, 176, 231, 251, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 5, 20, 58, 130, 202, 238, 253, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 6, 18, 45, 97, 174, 221, 241, 251, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 6, 25, 53, 88, 128, 168, 203, 231, 250, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 4, 18, 40, 71, 108, 148, 185, 216, 238, 252, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 3, 13, 31, 57, 90, 128, 166, 199, 225, 243, 253, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 2, 10, 23, 44, 73, 109, 147, 183, 212, 233, 246, 254, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 6, 16, 33, 58, 90, 128, 166, 198, 223, 240, 250, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 5, 12, 25, 46, 75, 110, 146, 181, 210, 231, 244, 251, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 3, 8, 18, 35, 60, 92, 128, 164, 196, 221, 238, 248, 253, 255, 256 ], },
+        &ICDFContext { total: 256, dist: &[ 1, 3, 7, 14, 27, 48, 76, 110, 146, 180, 208, 229, 242, 249, 253, 255, 256 ], },
+    ]
+];
+
+const EXC_LSB: &ICDFContext = &ICDFContext {
+    total: 256,
+    dist: &[136, 256],
+};
+
+const EXC_SIGN: &[&[&[&ICDFContext]]] = &[
+    &[    // Inactive
+        &[    // Low offset
+            &ICDFContext { total: 256, dist: &[    2, 256 ], },
+            &ICDFContext { total: 256, dist: &[  207, 256 ], },
+            &ICDFContext { total: 256, dist: &[  189, 256 ], },
+            &ICDFContext { total: 256, dist: &[  179, 256 ], },
+            &ICDFContext { total: 256, dist: &[  174, 256 ], },
+            &ICDFContext { total: 256, dist: &[  163, 256 ], },
+            &ICDFContext { total: 256, dist: &[  157, 256 ], },
+        ],
+        &[ // High offset
+            &ICDFContext { total: 256, dist: &[   58, 256 ], },
+            &ICDFContext { total: 256, dist: &[  245, 256 ], },
+            &ICDFContext { total: 256, dist: &[  238, 256 ], },
+            &ICDFContext { total: 256, dist: &[  232, 256 ], },
+            &ICDFContext { total: 256, dist: &[  225, 256 ], },
+            &ICDFContext { total: 256, dist: &[  220, 256 ], },
+            &ICDFContext { total: 256, dist: &[  211, 256 ], },
+        ]
+    ],
+    &[ // Unvoiced
+        &[  // Low offset
+            &ICDFContext { total: 256, dist: &[    1, 256 ], },
+            &ICDFContext { total: 256, dist: &[  210, 256 ], },
+            &ICDFContext { total: 256, dist: &[  190, 256 ], },
+            &ICDFContext { total: 256, dist: &[  178, 256 ], },
+            &ICDFContext { total: 256, dist: &[  169, 256 ], },
+            &ICDFContext { total: 256, dist: &[  162, 256 ], },
+            &ICDFContext { total: 256, dist: &[  152, 256 ], },
+        ],
+        &[ // High offset
+            &ICDFContext { total: 256, dist: &[   48, 256 ], },
+            &ICDFContext { total: 256, dist: &[  242, 256 ], },
+            &ICDFContext { total: 256, dist: &[  235, 256 ], },
+            &ICDFContext { total: 256, dist: &[  224, 256 ], },
+            &ICDFContext { total: 256, dist: &[  214, 256 ], },
+            &ICDFContext { total: 256, dist: &[  205, 256 ], },
+            &ICDFContext { total: 256, dist: &[  190, 256 ], },
+        ]
+    ],
+    &[ // Voiced
+        &[    // Low offset
+            &ICDFContext { total: 256, dist: &[    1, 256 ], },
+            &ICDFContext { total: 256, dist: &[  162, 256 ], },
+            &ICDFContext { total: 256, dist: &[  152, 256 ], },
+            &ICDFContext { total: 256, dist: &[  147, 256 ], },
+            &ICDFContext { total: 256, dist: &[  144, 256 ], },
+            &ICDFContext { total: 256, dist: &[  141, 256 ], },
+            &ICDFContext { total: 256, dist: &[  138, 256 ], },
+        ],
+        &[ // High offset
+            &ICDFContext { total: 256, dist: &[    8, 256 ], },
+            &ICDFContext { total: 256, dist: &[  203, 256 ], },
+            &ICDFContext { total: 256, dist: &[  187, 256 ], },
+            &ICDFContext { total: 256, dist: &[  176, 256 ], },
+            &ICDFContext { total: 256, dist: &[  168, 256 ], },
+            &ICDFContext { total: 256, dist: &[  161, 256 ], },
+            &ICDFContext { total: 256, dist: &[  154, 256 ], },
+        ]
+    ]
+];
+
+const QUANT_OFFSET: &[&[i32]] = &[
+    &[25, 60], // Inactive or Unvoiced
+    &[ 8, 25], // Voiced
+];
+
 #[derive(Debug, Default)]
 pub struct SilkFrame {
     frame_type: FrameType,
     log_gain: isize,
     coded: bool,
+    prev_voiced: bool,
     nlsfs: [i16; 16],
     lpc: [f32; 16],
     interpolated_lpc: [f32; 16],
+    previous_lag: i32,
 }
 
 impl SilkFrame {
@@ -1082,17 +1575,12 @@ impl SilkFrame {
         log_gain.log2lin() as f32 / 65536.0f32
     }
 
+    // TODO: once collect to slice is available rework to avoid allocations.
     fn parse_lpc<B: Band>(&mut self, rd: &mut RangeDecoder, interpolate: bool) {
-        /* TODO: use this once rust supports that
-        let mut res = [0; B::ORDER];
-        let mut lsfs_s2 = [0; B::ORDER];
-        let mut nlsfs = [0; B::ORDER];
-        */
-
         let idx = self.frame_type.voiced_index();
         let lsf_s1 = rd.decode_icdf(B::STAGE1[idx]);
 
-        // TODO: store in the Band trait
+        // TODO: directly reference the tables
         let (map, step, weight_map, weight_map_index, weights, codebooks) = (
             B::MAP[lsf_s1],
             B::STEP,
@@ -1101,42 +1589,6 @@ impl SilkFrame {
             B::WEIGHT[lsf_s1],
             B::CODEBOOK[lsf_s1],
         );
-        /*
-        if wb {
-            println!("wb");
-            (
-                LSF_WB_MAP[lsf_s1],
-                9830,
-                LSF_PRED_WEIGHT_WB,
-                LSF_PRED_WEIGHT_INDEX_WB[lsf_s1],
-                LSF_WEIGHT_WB[lsf_s1],
-                LSF_CODEBOOK_WB[lsf_s1],
-                LSF_MIN_SPACING_WB,
-            )
-        } else {
-            (
-                LSF_NB_MB_MAP[lsf_s1],
-                11796,
-                LSF_PRED_WEIGHT_NB_MB,
-                LSF_PRED_WEIGHT_INDEX_NB_MB[lsf_s1],
-                LSF_WEIGHT_NB_MB[lsf_s1],
-                LSF_CODEBOOK_NB_MB[lsf_s1],
-                LSF_MIN_SPACING_NB_MB,
-            )
-        };*/
-
-        /*
-        for (mut lsf_s2, icdf) in lsfs_s2.iter_mut().zip(map) {
-            let lsf = rd.decode_icdf(icdf) as isize - 4;
-            *lsf_s2 = if lsf == -4 {
-                lsf - rd.decode_icdf(LSF_STAGE2_EXTENSION) as isize
-            } else if lsf == 4 {
-                lsf + rd.decode_icdf(LSF_STAGE2_EXTENSION) as isize
-            } else {
-                lsf
-            };
-            println!("lsf2 {}", *lsf_s2);
-        } */
 
         let lsfs_s2 = map.iter()
             .map(|icdf| {
@@ -1228,8 +1680,155 @@ impl SilkFrame {
         B::lsf_to_lpc(&mut self.lpc, nlsfs);
 
         println!("lpc {:#?}", self.lpc);
+    }
 
-        unreachable!();
+    fn parse_pitch_lags<P: PitchLag>(
+        &mut self,
+        rd: &mut RangeDecoder,
+        subframes: &mut [SubFrame],
+        absolute: bool,
+    ) {
+        let parse_absolute_lag = |rd: &mut RangeDecoder| {
+            let high = rd.decode_icdf(PITCH_HIGH_PART) as i32;
+            let low = rd.decode_icdf(P::LOW_PART) as i32;
+
+            high * P::SCALE as i32 + low + P::MIN_LAG as i32
+        };
+
+        let lag = if !absolute {
+            let delta = rd.decode_icdf(PITCH_DELTA) as i32;
+            if delta != 0 {
+                self.previous_lag + delta - 9
+            } else {
+                parse_absolute_lag(rd)
+            }
+        } else {
+            parse_absolute_lag(rd)
+        };
+
+        self.previous_lag = lag;
+
+        let offsets = if subframes.len() == 2 {
+            let idx = rd.decode_icdf(P::CONTOUR[0]);
+            P::OFFSET[0][idx]
+        } else {
+            let idx = rd.decode_icdf(P::CONTOUR[1]);
+            P::OFFSET[1][idx]
+        };
+
+        for (sf, &off) in subframes.iter_mut().zip(offsets.iter()) {
+            sf.pitch_lag = (lag + off as i32).min(P::MAX_LAG as i32).max(P::MIN_LAG as i32);
+        }
+    }
+
+    fn parse_ltp_filter_coeff(&mut self, rd: &mut RangeDecoder, subframes: &mut [SubFrame]) {
+        let idx_period = rd.decode_icdf(LTP_PERIODICITY);
+
+        for sf in subframes.iter_mut() {
+            let idx_filter = rd.decode_icdf(LTP_FILTER[idx_period]);
+            let filter_taps = LTP_TAPS[idx_period][idx_filter];
+            for (tap_f32, &tap_i8) in sf.ltp_taps.iter_mut().zip(filter_taps.iter()) {
+                *tap_f32 = tap_i8 as f32 / 128f32;
+            }
+        }
+    }
+
+    fn parse_excitation<S: ShellBlock>(&mut self, rd: &mut RangeDecoder, residuals: &mut [f32], long_frame: bool) {
+        let shell_blocks = S::SHELL_BLOCKS[long_frame as usize] as usize;
+        let pulsecount: &mut [u8] = &mut [0u8; 20][..shell_blocks];
+        let lsbcount: &mut [u8] = &mut [0u8; 20][..shell_blocks];
+        let excitation: &mut [i32] = &mut [0i32; 320][..shell_blocks * 16];
+        let mut seed = rd.decode_icdf(LCG_SEED);
+        let voiced_index = self.frame_type.voiced_index();
+        let ratelevel = rd.decode_icdf(EXC_RATE[voiced_index]);
+
+        for (pc, lsb) in pulsecount.iter_mut().zip(lsbcount.iter_mut()) {
+            let mut p = rd.decode_icdf(PULSE_COUNT[ratelevel]);
+
+            if p == 17 {
+                let mut l = 0;
+                while p == 17 && { l += 1; l } != 10 {
+                    p = rd.decode_icdf(PULSE_COUNT[9]);
+                }
+                if l == 10 {
+                    p = rd.decode_icdf(PULSE_COUNT[10]);
+                }
+
+                *lsb = l as u8;
+                *pc = p as u8;
+            }
+        }
+
+        for (&p, loc) in pulsecount.iter().zip(excitation.chunks_mut(16)) {
+            if p == 0 {
+                for ex in loc.iter_mut() {
+                    *ex = 0;
+                }
+            } else {
+                fn split_loc(rd: &mut RangeDecoder, level: usize, avail: i32) -> [i32; 2] {
+                    if avail == 0 {
+                        [0, 0]
+                    } else {
+                        let idx = (((avail - 1 + 5) * (avail - 1)) >> 1) as usize;
+                        let left = rd.decode_icdf(PULSE_LOCATION[level][idx]) as i32;
+                        let right = avail - left;
+
+                        [left as i32, right as i32]
+                    }
+                }
+
+                let dist = split_loc(rd, 0, p as i32);
+                for (lv1, &avail) in loc.chunks_mut(8).zip(dist.iter()) {
+                    let dist = split_loc(rd, 1, avail);
+                    for (lv2, &avail) in lv1.chunks_mut(4).zip(dist.iter()) {
+                        let dist = split_loc(rd, 2, avail);
+                        for (lv3, &avail) in lv2.chunks_mut(2).zip(dist.iter()) {
+                            let dist = split_loc(rd, 3, avail);
+
+                            lv3.copy_from_slice(&dist);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (&bits, loc) in lsbcount.iter().zip(excitation.chunks_mut(16)) {
+            for l in loc.iter_mut() {
+                for _ in 0..bits {
+                    *l = (*l << 1) | (rd.decode_icdf(EXC_LSB) as i32);
+                }
+            }
+        }
+
+        for (&p, loc) in pulsecount.iter().zip(excitation.chunks_mut(16)) {
+            for l in loc.iter_mut() {
+                if *l != 0 {
+                    let signal_type = self.frame_type.signal_type_index();
+                    let qoffset_type = self.frame_type.qoffset_type_index();
+                    let pulse = p.min(6) as usize;
+
+                    let sign = rd.decode_icdf(EXC_SIGN[signal_type][qoffset_type][pulse]);
+
+                    if sign == 0 {
+                        *l *= -1;
+                    }
+                }
+            }
+        }
+
+        for (&l, r) in excitation.iter().zip(residuals.iter_mut()) {
+            let voiced = self.frame_type.voiced_index();
+            let qoffset = self.frame_type.qoffset_type_index();
+            let mut ex = l * 256 | QUANT_OFFSET[voiced][qoffset] - 20 * l.signum();
+
+            seed = (196314165 * seed + 907633515) & 0xffff_ffff;
+            if (seed & 0x80000000) != 0 {
+                ex *= -1;
+            }
+            seed = (((seed as isize) + (l as isize)) & 0xffff_ffff) as usize;
+
+            *r = (ex as f32) / 8388608.0f32;
+        }
     }
 
     fn parse(
@@ -1241,23 +1840,48 @@ impl SilkFrame {
     ) -> Result<()> {
         self.frame_type = if vad {
             match rd.decode_icdf(FRAME_TYPE_ACTIVE) {
-                0 => FrameType::UnvoicedLow,
-                1 => FrameType::UnvoicedHigh,
-                2 => FrameType::VoicedLow,
-                3 => FrameType::VoicedHigh,
+                0 => FrameType {
+                    active: true,
+                    voiced: false,
+                    high: false,
+                }, // UnvoicedLow,
+                1 => FrameType {
+                    active: true,
+                    voiced: false,
+                    high: true,
+                }, // UnvoicedHigh,
+                2 => FrameType {
+                    active: true,
+                    voiced: true,
+                    high: false,
+                }, // VoicedLow,
+                3 => FrameType {
+                    active: true,
+                    voiced: true,
+                    high: true,
+                }, // VoicedHigh,
                 _ => unreachable!(),
             }
         } else {
             if rd.decode_icdf(FRAME_TYPE_INACTIVE) == 0 {
-                FrameType::InactiveLow
+                FrameType {
+                    active: false,
+                    voiced: false,
+                    high: false,
+                } // InactiveLow
             } else {
-                FrameType::InactiveHigh
+                FrameType {
+                    active: false,
+                    voiced: false,
+                    high: true,
+                } // InactiveHigh
             }
         };
 
         println!("Type {:?}", self.frame_type);
 
         let mut sfs: [SubFrame; 4] = Default::default();
+        let mut residuals = [0f32; LPC_HISTORY + RES_HISTORY];
 
         for (i, mut sf) in &mut sfs[..info.subframes].iter_mut().enumerate() {
             let coded = i == 0 && (first || !self.coded);
@@ -1265,10 +1889,48 @@ impl SilkFrame {
             println!("subframe {} coded {} gain {}", i, coded, sf.gain);
         }
 
+        // TODO: monomorphize over long/short frames?
+        let long_frame = info.subframes == 4;
+
+        // TODO: move the WB/NB_MB up
         if info.bandwidth > Bandwidth::Medium {
-            self.parse_lpc::<WB>(rd, info.subframes == 4);
+            self.parse_lpc::<WB>(rd, long_frame);
         } else {
-            self.parse_lpc::<NB_MB>(rd, info.subframes == 4);
+            self.parse_lpc::<NB_MB>(rd, long_frame);
+        }
+
+        let scale = if self.frame_type.voiced {
+            let absolute = first || !self.prev_voiced;
+            match info.bandwidth {
+                Bandwidth::Narrow => {
+                    self.parse_pitch_lags::<NB>(rd, &mut sfs[..info.subframes], absolute);
+                },
+                Bandwidth::Medium => {
+                    self.parse_pitch_lags::<MB>(rd, &mut sfs[..info.subframes], absolute);
+                },
+                _ => {
+                    self.parse_pitch_lags::<WB>(rd, &mut sfs[..info.subframes], absolute);
+                }
+            }
+
+            self.parse_ltp_filter_coeff(rd, &mut sfs[..info.subframes]);
+
+            LTP_SCALE[rd.decode_icdf(LTP_SCALE_INDEX)] as f32
+        } else {
+            15565 as f32
+        } / 16384f32;
+
+
+        match info.bandwidth {
+            Bandwidth::Narrow => {
+                self.parse_excitation::<NB>(rd, &mut residuals[RES_HISTORY..], long_frame);
+            },
+            Bandwidth::Medium => {
+                self.parse_excitation::<MB>(rd, &mut residuals[RES_HISTORY..], long_frame);
+            },
+            _ => {
+                self.parse_excitation::<WB>(rd, &mut residuals[RES_HISTORY..], long_frame);
+            }
         }
 
         Ok(())
@@ -1375,17 +2037,17 @@ impl Silk {
 
         println!("{:?} {:?}", mid_vad, side_vad);
         for i in 0..self.frames {
-            let coded = i == 0;
+            let first = i == 0;
             let midonly = if self.stereo {
                 self.parse_stereo_weight(rd, side_vad[i])
             } else {
                 false
             };
 
-            self.mid_frame.parse(rd, &self.info, mid_vad[i], coded)?;
+            self.mid_frame.parse(rd, &self.info, mid_vad[i], first)?;
 
             if self.stereo && !midonly {
-                self.side_frame.parse(rd, &self.info, side_vad[i], coded)?;
+                self.side_frame.parse(rd, &self.info, side_vad[i], first)?;
             }
         }
 
