@@ -168,7 +168,7 @@ mod test {
         let p = env!("CARGO_MANIFEST_DIR");
         let mut d = PathBuf::from(p);
         d.push("assets/_");
-        for i in /*1..12*/ 1..3 {
+        for i in /*1..12*/ 2..3 {
             let filename = format!("testvector{:02}.mka", i);
             d.set_file_name(filename);
             println!("path {:?}", d);

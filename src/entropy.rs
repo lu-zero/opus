@@ -129,13 +129,12 @@ impl<'a> RangeDecoder<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
         let mut bits = BitReadBE::new(buf);
         let value = 127 - bits.get_bits_32(7) as usize;
-
         let mut r = RangeDecoder {
             bits: bits,
             revs: ReverseBitReadLE::new(buf),
             range: 128,
             value: value,
-            total: CODE_BITS + 1,
+            total: SYM_BITS + 1,
         };
 
         r.normalize();
@@ -145,7 +144,6 @@ impl<'a> RangeDecoder<'a> {
 
     fn update(&mut self, scale: usize, low: usize, high: usize, total: usize) {
         let s = scale * (total - high);
-        // println!("update {} {} {} {} {} -> {}", scale, low, high, total, s, self.value);
         self.value -= s;
         self.range = if low != 0 {
             scale * (high - low)
