@@ -1706,7 +1706,7 @@ impl SilkFrame {
 
         B::lsf_to_lpc(&mut self.lpc, nlsfs);
 
-        // println!("lpc {:#?}", self.lpc);
+        println!("lpc {:#?}", self.lpc);
     }
 
     fn parse_pitch_lags<P: PitchLag>(
@@ -1775,7 +1775,7 @@ impl SilkFrame {
         // println!("seed {} shell {}", seed, shell_blocks);
         for (pc, lsb) in pulsecount.iter_mut().zip(lsbcount.iter_mut()) {
             let mut p = rd.decode_icdf(PULSE_COUNT[ratelevel]);
-            // println!("p {}", p);
+            println!("p {}", p);
             if p == 17 {
                 let mut l = 0;
                 while p == 17 && { l += 1; l } != 10 {
@@ -1786,9 +1786,10 @@ impl SilkFrame {
                 }
                 *lsb = l as u8;
             }
+            println!("fp {}", p);
             *pc = p as u8;
         }
-
+        println!("lsb {:#?}", lsbcount);
         for (&p, loc) in pulsecount.iter().zip(excitation.chunks_mut(16)) {
             if p == 0 {
                 for ex in loc.iter_mut() {
@@ -1800,9 +1801,11 @@ impl SilkFrame {
                         [0, 0]
                     } else {
                         let idx = (((avail - 1 + 5) * (avail - 1)) >> 1) as usize;
-                        // println!("level {} total {} index {}", level, avail, idx);
-                        let left = rd.decode_icdf(PULSE_LOCATION[level][idx]) as i32;
+                        println!("level {} total {} index {}",level, avail, idx);
+                        let left = rd.decode_icdf(PULSE_LOCATION[level][(avail - 1) as usize]) as i32;
                         let right = avail - left;
+
+                        println!("{} {}", left, right);
 
                         [left as i32, right as i32]
                     }
@@ -1823,6 +1826,8 @@ impl SilkFrame {
             }
         }
 
+        println!("excitation {:#?}", excitation);
+
         for (&bits, loc) in lsbcount.iter().zip(excitation.chunks_mut(16)) {
             for l in loc.iter_mut() {
                 for _ in 0..bits {
@@ -1830,6 +1835,8 @@ impl SilkFrame {
                 }
             }
         }
+
+        println!("lsb excitation {:#?}", excitation);
 
         for (&p, loc) in pulsecount.iter().zip(excitation.chunks_mut(16)) {
             for l in loc.iter_mut() {
@@ -1861,6 +1868,7 @@ impl SilkFrame {
             seed = seed.wrapping_add(l as u32);
 
             *r = (ex as f32) / 8388608.0f32;
+            println!("res {:.6}", r);
         }
     }
 
@@ -1955,7 +1963,7 @@ impl SilkFrame {
             15565 as f32
         } / 16384f32;
 
-        // println!("ltpscale {}", ltpscale);
+        println!("ltpscale {:.6}", ltpscale);
 
         match info.bandwidth {
             Bandwidth::Narrow => {
@@ -2063,8 +2071,6 @@ impl SilkFrame {
             self.output[i] = self.output[i + info.f_size];
             println!("history {:.6} output {:.6}", self.lpc_history[i], self.output[i]);
         }
-
-
 
         self.coded = true;
 
@@ -2178,7 +2184,7 @@ impl Silk {
         if self.stereo {
             lp(rd, &mut side_vad[..self.frames])?;
         }
-        // println!("{:?} {:?}", mid_vad, side_vad);
+        println!("{:?} {:?}", mid_vad, side_vad);
         for i in 0..self.frames {
             let first = i == 0;
             let midonly = if self.stereo {
@@ -2186,7 +2192,7 @@ impl Silk {
             } else {
                 false
             };
-
+            println!("{} midonly {} stereo {}", i, midonly, self.stereo);
             self.mid_frame.parse(rd, &self.info, mid_vad[i], first)?;
 
             if self.stereo && !midonly {

@@ -10,8 +10,8 @@ impl<'a> ReverseBitReadLE<'a> {
         let start = end.saturating_sub(count);
         let mut v = 0;
 
-        for b in self.buffer[start..end].iter() {
-            v = v << 8 | *b as u64;
+        for &b in self.buffer[start..end].iter() {
+            v = v << 8 | b as u64;
         }
 
         v
@@ -19,10 +19,52 @@ impl<'a> ReverseBitReadLE<'a> {
 }
 
 impl<'a> BitReadFill for ReverseBitReadLE<'a> {
-    // TODO: check if we can safely read in batches of 4 or 8
     #[inline(always)]
     fn can_refill(&self) -> bool {
         self.index <= self.buffer.len()
+    }
+    #[inline(always)]
+    fn fill32(&self) -> u64 {
+        self.fill(4)
+    }
+    #[inline(always)]
+    fn fill64(&self) -> u64 {
+        self.fill(8)
+    }
+}
+
+big_endian_reader!{ UnpaddedBitReadBE }
+
+impl<'a> UnpaddedBitReadBE<'a> {
+    #[inline(always)]
+    fn fill(&self, count: usize) -> u64 {
+        let len = self.buffer.len();
+        let end = len.min(self.index + count);
+        let start = self.index;
+        let mut v = 0;
+
+        for &b in self.buffer[start..end].iter() {
+            v = v << 8 | b as u64;
+        }
+
+        // println!("Filling {:?} {}", start..end, v);
+
+        let v = v << (8 * (count - (end - start)));
+
+
+        v
+    }
+}
+
+impl<'a> BitReadFill for UnpaddedBitReadBE<'a> {
+    #[inline(always)]
+    fn can_refill(&self) -> bool {
+        let v = self.index < self.buffer.len();
+
+        if !v {
+            println!("*** Ending *** {}", self.buffer.len());
+        }
+        v
     }
     #[inline(always)]
     fn fill32(&self) -> u64 {
@@ -95,13 +137,14 @@ mod test {
 /// See [rfc6716 section 4.1](https://tools.ietf.org/html/rfc6716#section-4.1)
 #[derive(Debug)]
 pub struct RangeDecoder<'a> {
-    bits: BitReadBE<'a>,
+    bits: UnpaddedBitReadBE<'a>,
     revs: ReverseBitReadLE<'a>,
     range: usize,
     value: usize,
     total: usize,
 }
 
+#[derive(Debug)]
 pub struct ICDFContext {
     pub total: usize,
     pub dist: &'static [usize],
@@ -119,7 +162,9 @@ const CODE_EXTRA: usize =  (CODE_BITS - 2) % SYM_BITS + 1;
 impl<'a> RangeDecoder<'a> {
     fn normalize(&mut self) {
         while self.range <= CODE_BOT {
-            let v = self.bits.get_bits_32(SYM_BITS) as usize ^ SYM_MAX;
+            let v = self.bits.get_bits_32(SYM_BITS);
+            println!("val {} range {} normalize {}", self.value, self.range, v);
+            let v = v as usize ^ SYM_MAX;
             self.value = ((self.value << SYM_BITS) | v) & (CODE_TOP - 1);
             self.range <<= SYM_BITS;
             self.total += SYM_BITS;
@@ -127,7 +172,7 @@ impl<'a> RangeDecoder<'a> {
     }
 
     pub fn new(buf: &'a [u8]) -> Self {
-        let mut bits = BitReadBE::new(buf);
+        let mut bits = UnpaddedBitReadBE::new(buf);
         let value = 127 - bits.get_bits_32(7) as usize;
         let mut r = RangeDecoder {
             bits: bits,
@@ -187,6 +232,7 @@ impl<'a> RangeDecoder<'a> {
         let dist = icdf.dist;
         let (scale, sym) = self.get_scale_symbol(total);
         let k = dist.iter().position(|v| *v > sym).unwrap();
+        println!("icdf val {} range {} k {} dist {:?}", self.value, self.range, k, dist);
         let high = dist[k];
         let low = if k > 0 { dist[k - 1] } else { 0 };
         // println!("{} {} decode to {}", scale, sym, k);

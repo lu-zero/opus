@@ -151,7 +151,6 @@ mod test {
         d.set_extradata(ctx.info.streams[0].get_extradata().unwrap());
         d.configure();
 
-
         while let Ok(ev) = ctx.read_event() {
             match ev {
                 Event::NewPacket(p) => {
