@@ -923,7 +923,7 @@ pub trait Band {
 
                 for v in a.iter_mut() {
                     *v = v.mul_round(chirp, 16);
-                    chirp = (start * chirp + 32768) >> 16;
+                    chirp = ((start as u32 * chirp as u32 + 32768) >> 16) as i32;
                 }
             } else {
                 deadline = false;
@@ -1857,8 +1857,9 @@ impl SilkFrame {
         for (&l, r) in excitation.iter().zip(residuals.iter_mut()) {
             let voiced = self.frame_type.voiced_index();
             let qoffset = self.frame_type.qoffset_type_index();
-            let mut ex = l * 256 | QUANT_OFFSET[voiced][qoffset] - 20 * l.signum();
-
+            let ex1 = l * 256 | QUANT_OFFSET[voiced][qoffset];
+            let mut ex = ex1 - 20 * l.signum();
+            println!("res {} val {} {}", ex1, l, ex);
 
             seed = seed.wrapping_mul(196314165).wrapping_add(907633515);
             // println!("seed {}",  seed);
@@ -2000,14 +2001,27 @@ impl SilkFrame {
                     let start = LPC_HISTORY + i * info.sf_size - (sf.pitch_lag as usize) - LTP_ORDER / 2;
                     let stop = LPC_HISTORY + i * info.sf_size - end;
 
-                    let previous_w = self.output[start - order - 1 .. stop - order - 1].windows(order);
+                    let previous_w = self.output[start - order .. stop].windows(order);
                     let iter = self.output[start .. stop].iter().zip(residuals[start .. stop].iter_mut());
+
+                    println!("previous_w {} {} {} {} {} {} {}",
+                             start - order,
+                             stop - order,
+                             - (sf.pitch_lag as isize) - LTP_ORDER as isize / 2,
+                             info.sf_size,
+                             LPC_HISTORY,
+                             i,
+                             order);
 
                     for ((&o, r), p_w) in iter.zip(previous_w) {
                         let mut sum = o;
-                        for (&c, &p) in lpc_coeff.iter().zip(p_w) {
+
+                        println!("{:?}", p_w);
+                        for (&c, &p) in lpc_coeff.iter().zip(p_w.iter().rev()) {
+                            println!("rewhite {:.6} {:.6} {:.6}", sum, c, p);
                             sum -= c * p;
                         }
+
 
                         *r = sum.max(-1f32).min(1f32) * scale / sf.gain;
                     }
@@ -2035,6 +2049,7 @@ impl SilkFrame {
                         }
 
                         residuals[i] = sum;
+                        println!("residuals {:.6}", sum);
                     }
                 }
             }
@@ -2054,6 +2069,7 @@ impl SilkFrame {
             for j in 0 .. info.sf_size {
                 let mut sum = res[j] * sf.gain;
                 for k in 0..order {
+                    println!("sum {:.6} coeff {:.6} lpc {:.6}", sum, lpc_coeff[k], lpc[j + order - k - 1]);
                     sum += lpc_coeff[k] * lpc[j + order - k - 1];
                 }
                 lpc[j + order] = sum;
