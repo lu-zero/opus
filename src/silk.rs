@@ -2045,6 +2045,7 @@ impl SilkFrame {
 
                         for o in 0 .. LTP_ORDER {
                             let idx = i - (sf.pitch_lag as usize) + LTP_ORDER / 2 - o;
+                            println!("ord {} idx {}", o, idx);
                             sum += sf.ltp_taps[o] * residuals[idx];
                         }
 
