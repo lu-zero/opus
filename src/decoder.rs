@@ -151,13 +151,15 @@ mod test {
         d.set_extradata(ctx.info.streams[0].get_extradata().unwrap());
         d.configure();
 
-        while let Ok(ev) = ctx.read_event() {
-            match ev {
-                Event::NewPacket(p) => {
-                    println!("{:?}", p);
-                    d.send_packet(&p).unwrap();
-                },
-                _ => unreachable!(),
+        for _ in 0..10 {
+            if let Ok(ev) = ctx.read_event() {
+                match ev {
+                    Event::NewPacket(p) => {
+                        println!("{:?}", p);
+                        d.send_packet(&p).unwrap();
+                    },
+                    _ => unreachable!(),
+                }
             }
         }
     }
