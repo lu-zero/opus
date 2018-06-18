@@ -107,7 +107,7 @@ impl Decoder for Dec {
                 unimplemented!() // TODO: Support properly channel mapping
             } else {
                 // println!("channels {}", channels);
-                self.silk = Some(Silk::new());
+                self.silk = Some(Silk::new(channels > 1));
                 // self.info.map = ChannelMap::default_map(channels);
             }
 
@@ -149,7 +149,7 @@ mod test {
         let mut d = Dec::new();
 
         d.set_extradata(ctx.info.streams[0].get_extradata().unwrap());
-        d.configure();
+        let _ = d.configure();
 
         for _ in 0..10 {
             if let Ok(ev) = ctx.read_event() {
@@ -169,12 +169,11 @@ mod test {
         let p = env!("CARGO_MANIFEST_DIR");
         let mut d = PathBuf::from(p);
         d.push("assets/_");
-        for i in /*1..12*/ 2..3 {
+        for i in /*1..12*/ 8..9 {
             let filename = format!("testvector{:02}.mka", i);
             d.set_file_name(filename);
             println!("path {:?}", d);
             parse_packet(&d);
         }
     }
-
 }
