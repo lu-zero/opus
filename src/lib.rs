@@ -10,9 +10,14 @@ extern crate matroska;
 #[cfg(test)]
 extern crate av_format as format;
 
+extern crate num_complex as complex;
+
 mod entropy;
 mod packet;
-mod silk;
 mod maths;
+
+mod silk;
+mod celt;
+
 pub mod decoder;
 
