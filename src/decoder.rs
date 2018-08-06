@@ -5,7 +5,7 @@ use data::frame::ArcFrame;
 
 use packet::*;
 
-use entropy::RangeDecoder;
+use entropy::*;
 use silk::Silk;
 
 struct Des {
@@ -43,18 +43,72 @@ impl Decoder for Dec {
             let silk = self.silk.as_mut().unwrap();
             let pkt = Packet::from_slice(pkt.data.as_slice())?;
 
-            // println!("{:?}", pkt);
+            println!("{:?}", pkt);
 
+            // Configure the CELT and the SILK decoder with the
+            // frame-invariant, per-packet information
             if pkt.mode != Mode::CELT {
                 silk.setup(&pkt);
             }
 
+/*            if pkt.mode != Mode::SILK {
+                celt.setup(&pkt);
+            }
+*/
+            if pkt.mode == Mode::HYBRID {
+                unimplemented!();
+            }
+
+            // Decode the frames
+            //
+            // If a silk or a hybrid frame is preset, decode the silk part first
             for frame in pkt.frames {
                 let mut rd = RangeDecoder::new(frame);
                 // println!("Decoding {:?}", frame);
 
                 if pkt.mode != Mode::CELT {
                     silk.decode(&mut rd)?;
+                } else {
+                    silk.flush();
+                }
+
+                let size = frame.len();
+                let consumed = rd.tell();
+                let redundancy = if pkt.mode == Mode::HYBRID && consumed + 37 <= size * 8 {
+                    rd.decode_logp(12)
+                } else if pkt.mode == Mode::SILK && consumed + 17 <= size * 8 {
+                    true
+                } else {
+                    false
+                };
+
+                println!("size {} consumed {} redundancy {}", size, consumed, redundancy);
+
+                if redundancy {
+                    let redundancy_pos = rd.decode_logp(1);
+
+                    let redundancy_size = if pkt.mode == Mode::HYBRID {
+                        rd.decode_uniform(256) + 2
+                    } else {
+                        size - (consumed + 7) / 8
+                    };
+
+                    if redundancy_size >= size {
+                        return Err(Error::InvalidData);
+                    }
+
+                    let size = size - redundancy_size;
+
+                    println!("redundancy pos {} size {}", redundancy_pos, redundancy_size);
+
+                    if redundancy_pos {
+                        // decode_redundancy
+                        // celt.flush()
+                    }
+                }
+
+                if pkt.mode != Mode::SILK {
+
                 }
             }
 
@@ -136,6 +190,7 @@ mod test {
     use super::*;
     use matroska::demuxer::*;
     use format::demuxer::Context;
+    use format::demuxer::Demuxer;
     use format::demuxer::Event;
     use format::buffer::*;
     use std::fs::File;

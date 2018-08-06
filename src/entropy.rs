@@ -264,7 +264,7 @@ impl<'a> RangeDecoder<'a> {
     }
 }
 
-trait CeltOnly {
+pub trait CeltOnly {
     fn rawbits(&mut self, len: usize) -> usize;
     fn decode_uniform(&mut self, len: usize) -> usize;
 }

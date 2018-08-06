@@ -1565,7 +1565,7 @@ impl SilkFrame {
                     if avail == 0 {
                         [0, 0]
                     } else {
-                        let idx = (((avail - 1 + 5) * (avail - 1)) >> 1) as usize;
+                        // let idx = (((avail - 1 + 5) * (avail - 1)) >> 1) as usize;
                         //                        println!("level {} total {} index {}",level, avail, idx);
                         let left =
                             rd.decode_icdf(PULSE_LOCATION[level][(avail - 1) as usize]) as i32;
@@ -1928,6 +1928,14 @@ impl Silk {
             left_outbuf: vec![0f32; 960],
             right_outbuf: vec![0f32; 960],
         }
+    }
+
+    pub fn flush(&mut self) {
+        self.mid_frame.flush();
+        self.side_frame.flush();
+
+        self.info.prev0 = 0.0;
+        self.info.prev1 = 0.0;
     }
 
     pub fn setup(&mut self, pkt: &Packet) {
