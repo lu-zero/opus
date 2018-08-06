@@ -9,11 +9,11 @@ readme = "README.md"
 keywords = ["opus"]
 
 [dependencies]
-av-data = { version = "0.1.0", path = "../rust-av/data" }
-av-bitstream = { version = "0.1.0", path = "../rust-av/bitstream" }
-av-codec = { version = "0.1.0", path = "../rust-av/codec" }
+av-bitstream = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
+av-codec = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
+av-data = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
+av-format = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
 num-complex = "0.2"
 
 [dev-dependencies]
-av-format = { version = "0.1.0", path = "../rust-av/format" }
-matroska = { version = "0.1.0", path = "../matroska" }
+matroska = { version = "0.1.0", git = "https://github.com/rust-av/matroska" }
