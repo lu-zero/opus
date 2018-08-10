@@ -196,6 +196,8 @@ mod test {
     use std::fs::File;
     use std::path::PathBuf;
 
+    use interpolate_name::interpolate_test;
+
     fn parse_packet(sample: &PathBuf) {
         let mut ctx = Context::new(Box::new(MkvDemuxer::new()),
                                    Box::new(AccReader::new(File::open(sample).unwrap())));
@@ -219,16 +221,24 @@ mod test {
         }
     }
 
-    #[test]
-    fn send_packet() {
+    #[interpolate_test(01, 1)]
+    #[interpolate_test(02, 2)]
+    #[interpolate_test(03, 3)]
+    #[interpolate_test(04, 4)]
+    #[interpolate_test(05, 5)]
+    #[interpolate_test(06, 7)]
+    #[interpolate_test(07, 7)]
+    #[interpolate_test(08, 8)]
+    #[interpolate_test(09, 9)]
+    #[interpolate_test(10, 10)]
+    #[interpolate_test(11, 11)]
+    #[interpolate_test(12, 12)]
+    fn send_packet(index: usize) {
         let p = env!("CARGO_MANIFEST_DIR");
         let mut d = PathBuf::from(p);
-        d.push("assets/_");
-        for i in /*1..12*/ 8..9 {
-            let filename = format!("testvector{:02}.mka", i);
-            d.set_file_name(filename);
-            println!("path {:?}", d);
-            parse_packet(&d);
-        }
+        d.push("assets");
+        d.push(format!("testvector{:02}.mka", index));
+        println!("path {:?}", d);
+        parse_packet(&d);
     }
 }
