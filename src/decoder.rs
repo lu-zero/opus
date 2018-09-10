@@ -51,12 +51,16 @@ impl Decoder for Dec {
                 silk.setup(&pkt);
             }
 
+            if pkt.mode == Mode::CELT {
+                // unimplemented!("CELT packet");
+            }
+
 /*            if pkt.mode != Mode::SILK {
                 celt.setup(&pkt);
             }
 */
             if pkt.mode == Mode::HYBRID {
-                unimplemented!();
+//                unimplemented!();
             }
 
             // Decode the frames

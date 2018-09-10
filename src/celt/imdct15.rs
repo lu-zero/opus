@@ -8,7 +8,7 @@ pub struct IMDCT15 {
 
     tmp: Vec<Complex32>,
     exptab: Vec<Vec<Complex32>>,
-    twiddle: Vec<Complex32>
+    twiddle: Vec<Complex32>,
 }
 
 fn p2len(p2: usize) -> usize {
@@ -23,10 +23,15 @@ const fn fact(n: f64) -> Complex32 {
 }
 */
 
-
 const FACT: &[Complex32] = &[
-    Complex32 { re: 0.30901699437494745, im: 0.95105651629515353 },
-    Complex32 { re: -0.80901699437494734, im: 0.58778525229247325}
+    Complex32 {
+        re: 0.30901699437494745,
+        im: 0.95105651629515353,
+    },
+    Complex32 {
+        re: -0.80901699437494734,
+        im: 0.58778525229247325,
+    },
 ];
 
 /* Below the equivalent with less factors
@@ -40,10 +45,7 @@ Once const fn and step_by are stabler reconsider the code
 */
 
 fn mulc(a: Complex32, b: Complex32) -> (f32, f32, f32, f32) {
-    (a.re * b.re,
-     a.re * b.im,
-     a.im * b.re,
-     a.im * b.im)
+    (a.re * b.re, a.re * b.im, a.im * b.re, a.im * b.im)
 }
 
 fn m_c(out: &mut [Complex32], inp: Complex32) {
@@ -81,18 +83,21 @@ impl IMDCT15 {
         let len4 = len2 / 2;
 
         let mut tmp = Vec::with_capacity(len * 2);
-        let twiddle = (len4..len2).map(|i| {
-            let v = 2f32 * PI * (i as f32 + 0.125) / len as f32;
-            Complex32::new(v.cos(), v.sin())
-        }).collect();
-
-        let mut exptab: Vec<Vec<Complex32>> = (0..6).map(|i| {
-            let len = p2len(i);
-            (0..len.max(19)).map(|j| {
-                let v = 2f32 * PI * j as f32 / len as f32;
+        let twiddle = (len4..len2)
+            .map(|i| {
+                let v = 2f32 * PI * (i as f32 + 0.125) / len as f32;
                 Complex32::new(v.cos(), v.sin())
-            }).collect()
-        }).collect();
+            }).collect();
+
+        let mut exptab: Vec<Vec<Complex32>> = (0..6)
+            .map(|i| {
+                let len = p2len(i);
+                (0..len.max(19))
+                    .map(|j| {
+                        let v = 2f32 * PI * j as f32 / len as f32;
+                        Complex32::new(v.cos(), v.sin())
+                    }).collect()
+            }).collect();
 
         for i in 0..4 {
             let v = exptab[0][i];
@@ -101,7 +106,14 @@ impl IMDCT15 {
 
         tmp.resize(len * 2, Complex32::default());
 
-        IMDCT15 {n, len2, len4, tmp, exptab, twiddle}
+        IMDCT15 {
+            n,
+            len2,
+            len4,
+            tmp,
+            exptab,
+            twiddle,
+        }
     }
 
     fn fft15(&self, out: &mut [Complex32], inp: &[Complex32], stride: usize) {
@@ -152,9 +164,11 @@ impl IMDCT15 {
     // Assume out is aligned at least by 64
     pub fn imdct15_half(&mut self, out: &mut [f32], inp: &[f32], stride: usize, scale: f32) {
         let mut dst: Vec<Complex32> = unsafe {
-            Vec::from_raw_parts(mem::transmute(out.as_mut_ptr()),
-                                out.len() / 2,
-                                out.len() / 2)
+            Vec::from_raw_parts(
+                mem::transmute(out.as_mut_ptr()),
+                out.len() / 2,
+                out.len() / 2,
+            )
         };
         let len8 = self.len4 / 2;
         let start = (self.len2 - 1) * stride;
@@ -170,15 +184,16 @@ impl IMDCT15 {
         for i in 0..len8 {
             let decr = len8 - i - 1;
             let incr = len8 + i;
-            let re0im1 = Complex32::new(dst[decr].im, dst[decr].re) * Complex32::new(self.twiddle[decr].im, self.twiddle[decr].im);
-            let re1im0 = Complex32::new(dst[incr].im, dst[incr].re) * Complex32::new(self.twiddle[incr].im, self.twiddle[incr].im);
+            let re0im1 = Complex32::new(dst[decr].im, dst[decr].re)
+                * Complex32::new(self.twiddle[decr].im, self.twiddle[decr].im);
+            let re1im0 = Complex32::new(dst[incr].im, dst[incr].re)
+                * Complex32::new(self.twiddle[incr].im, self.twiddle[incr].im);
 
             dst[decr] = Complex32::new(re0im1.re, re1im0.im).scale(scale);
             dst[incr] = Complex32::new(re1im0.re, re0im1.im).scale(scale);
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -192,10 +207,11 @@ mod test {
 
     #[test]
     fn fft5() {
-        let a: Vec<Complex32> = (0..15).map(|v| {
-            let v = v as f32;
-            Complex32::new(v, -v)
-        }).collect();
+        let a: Vec<Complex32> = (0..15)
+            .map(|v| {
+                let v = v as f32;
+                Complex32::new(v, -v)
+            }).collect();
 
         println!("{:#?}", a);
 
@@ -206,27 +222,27 @@ mod test {
         println!("{:#?}", out);
 
         let reference = [
-    Complex {
-        re: 30.0,
-        im: -30.0
-    },
-    Complex {
-        re: -17.822865,
-        im: -2.8228645
-    },
-    Complex {
-        re: -9.936897,
-        im: 5.063103
-    },
-    Complex {
-        re: -5.063103,
-        im: 9.936897
-    },
-    Complex {
-        re: 2.8228645,
-        im: 17.822865
-    }
-];
+            Complex {
+                re: 30.0,
+                im: -30.0,
+            },
+            Complex {
+                re: -17.822865,
+                im: -2.8228645,
+            },
+            Complex {
+                re: -9.936897,
+                im: 5.063103,
+            },
+            Complex {
+                re: -5.063103,
+                im: 9.936897,
+            },
+            Complex {
+                re: 2.8228645,
+                im: 17.822865,
+            },
+        ];
         assert_eq!(&out[..], &reference[..]);
     }
 }

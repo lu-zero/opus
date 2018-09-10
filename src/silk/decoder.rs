@@ -1723,6 +1723,7 @@ impl SilkFrame {
         let long_frame = info.subframes == 4;
 
         // TODO: move the WB/NB_MB up
+        println!("bandwidth {:?} {}", info.bandwidth, info.bandwidth > Bandwidth::Medium);
         let order = if info.bandwidth > Bandwidth::Medium {
             self.parse_lpc::<WB>(rd, long_frame);
             WB::ORDER

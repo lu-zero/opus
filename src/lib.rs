@@ -1,5 +1,3 @@
-#![feature(proc_macro)]
-
 extern crate av_data as data;
 extern crate av_codec as codec;
 
