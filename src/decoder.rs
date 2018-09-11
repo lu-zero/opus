@@ -7,6 +7,7 @@ use packet::*;
 
 use entropy::*;
 use silk::Silk;
+use celt::Celt;
 
 struct Des {
     descr: Descr,
@@ -15,11 +16,12 @@ struct Des {
 struct Dec {
     extradata: Option<Vec<u8>>,
     silk: Option<Silk>,
+    celt: Option<Celt>,
 }
 
 impl Dec {
     fn new() -> Self {
-        Dec { extradata: None, silk: None }
+        Dec { extradata: None, silk: None, celt: None }
     }
 }
 
@@ -41,6 +43,7 @@ impl Decoder for Dec {
         }
         fn send_packet(&mut self, pkt: &AVPacket) -> Result<()> {
             let silk = self.silk.as_mut().unwrap();
+            let celt = self.celt.as_mut().unwrap();
             let pkt = Packet::from_slice(pkt.data.as_slice())?;
 
             println!("{:?}", pkt);
@@ -52,13 +55,9 @@ impl Decoder for Dec {
             }
 
             if pkt.mode == Mode::CELT {
-                // unimplemented!("CELT packet");
-            }
-
-/*            if pkt.mode != Mode::SILK {
                 celt.setup(&pkt);
             }
-*/
+
             if pkt.mode == Mode::HYBRID {
 //                unimplemented!();
             }
@@ -112,6 +111,14 @@ impl Decoder for Dec {
                 }
 
                 if pkt.mode != Mode::SILK {
+                    let mut out_buf = [0f32; 1024]; // TODO
+                    let range = if pkt.mode == Mode::HYBRID {
+                        17
+                    } else {
+                        0
+                    } .. pkt.bandwidth.celt_band();
+
+                    celt.decode(&mut rd, &mut out_buf, pkt.frame_duration, range)
 
                 }
             }
@@ -166,6 +173,7 @@ impl Decoder for Dec {
             } else {
                 // println!("channels {}", channels);
                 self.silk = Some(Silk::new(channels > 1));
+                self.celt = Some(Celt::new(channels > 1));
                 // self.info.map = ChannelMap::default_map(channels);
             }
 
@@ -225,15 +233,15 @@ mod test {
         }
     }
 
-    #[interpolate_test(01, 1)]
-    #[interpolate_test(02, 2)]
-    #[interpolate_test(03, 3)]
-    #[interpolate_test(04, 4)]
-    #[interpolate_test(05, 5)]
-    #[interpolate_test(06, 7)]
-    #[interpolate_test(07, 7)]
-    #[interpolate_test(08, 8)]
-    #[interpolate_test(09, 9)]
+    #[interpolate_test(1, 1)]
+    #[interpolate_test(2, 2)]
+    #[interpolate_test(3, 3)]
+    #[interpolate_test(4, 4)]
+    #[interpolate_test(5, 5)]
+    #[interpolate_test(6, 6)]
+    #[interpolate_test(7, 7)]
+    #[interpolate_test(8, 8)]
+    #[interpolate_test(9, 9)]
     #[interpolate_test(10, 10)]
     #[interpolate_test(11, 11)]
     #[interpolate_test(12, 12)]

@@ -29,10 +29,23 @@ pub enum Bandwidth {
     Full = 48000,
 }
 
+impl Bandwidth {
+    pub fn celt_band(&self) -> usize {
+        use self::Bandwidth::*;
+        match self {
+            Narrow => 13,
+            Medium => 17,
+            Wide => 17,
+            SuperWide => 19,
+            Full => 21,
+        }
+    }
+}
+
 /// Frame Duration
 ///
 /// See [section-2.1.4](https://tools.ietf.org/html/rfc6716#section-2.1.4)
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FrameDuration {
     /// 2.5ms
     VeryShort = 120,

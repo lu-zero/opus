@@ -142,6 +142,8 @@ pub struct RangeDecoder<'a> {
     range: usize,
     value: usize,
     total: usize,
+
+    size_in_bits: usize,
 }
 
 #[derive(Debug)]
@@ -180,6 +182,7 @@ impl<'a> RangeDecoder<'a> {
             range: 128,
             value: value,
             total: SYM_BITS + 1,
+            size_in_bits: buf.len() * 8,
         };
 
         r.normalize();
@@ -262,11 +265,17 @@ impl<'a> RangeDecoder<'a> {
 
         self.total * 8 - lg
     }
+
+    #[inline(always)]
+    pub fn available(&self) -> usize {
+        self.size_in_bits - self.tell()
+    }
 }
 
 pub trait CeltOnly {
     fn rawbits(&mut self, len: usize) -> usize;
     fn decode_uniform(&mut self, len: usize) -> usize;
+    fn to_end(&mut self);
 }
 
 const UNI_BITS: usize = 8;
@@ -294,5 +303,9 @@ impl<'a> CeltOnly for RangeDecoder<'a> {
         } else {
             k
         }
+    }
+
+    fn to_end(&mut self) {
+        self.total += self.size_in_bits - self.tell();
     }
 }
