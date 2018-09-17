@@ -1723,7 +1723,7 @@ impl SilkFrame {
         let long_frame = info.subframes == 4;
 
         // TODO: move the WB/NB_MB up
-        println!("bandwidth {:?} {}", info.bandwidth, info.bandwidth > Bandwidth::Medium);
+        // println!("bandwidth {:?} {}", info.bandwidth, info.bandwidth > Bandwidth::Medium);
         let order = if info.bandwidth > Bandwidth::Medium {
             self.parse_lpc::<WB>(rd, long_frame);
             WB::ORDER
@@ -1891,10 +1891,10 @@ impl SilkFrame {
         for i in 0..LPC_HISTORY {
             self.lpc_history[i] = self.lpc_history[i + info.f_size];
             self.output[i] = self.output[i + info.f_size];
-            println!(
+            /* println!(
                 "history {:.6} output {:.6}",
                 self.lpc_history[i], self.output[i]
-            );
+            ); */
         }
 
         self.coded = true;
@@ -2045,7 +2045,7 @@ impl Silk {
             // println!("{:#.6} {:#.6}", r, l);
         }
 
-        println!("rem");
+        // println!("rem");
 
         for ((l, r), (m, s)) in iter {
             let p0 = 0.25 * (m[0] + 2.0 * m[1] + m[2]);
@@ -2099,7 +2099,7 @@ impl Silk {
             }
             let out_range = i * self.info.f_size..(i + 1) * self.info.f_size;
             if self.stereo && self.stereo_out {
-                println!("unmix");
+                // println!("unmix");
                 self.unmix_ms(out_range);
             } else {
                 let in_start = LPC_HISTORY - self.info.f_size - 2;
@@ -2113,7 +2113,7 @@ impl Silk {
             }
         }
 
-        println!("stereo {} out {}", self.stereo, self.stereo_out);
+/*        println!("stereo {} out {}", self.stereo, self.stereo_out);
         println!(
             "right: {:#?}",
             &self.right_outbuf[..self.frames * self.info.f_size]
@@ -2122,7 +2122,7 @@ impl Silk {
             "left: {:#?}",
             &self.left_outbuf[..self.frames * self.info.f_size]
         );
-
+*/
         Ok(0)
     }
 }

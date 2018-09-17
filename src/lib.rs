@@ -15,6 +15,9 @@ extern crate interpolate_name;
 
 extern crate num_complex as complex;
 
+extern crate pretty_env_logger;
+#[macro_use] extern crate log;
+
 mod entropy;
 mod packet;
 mod maths;

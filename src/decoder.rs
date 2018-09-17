@@ -85,7 +85,7 @@ impl Decoder for Dec {
                     false
                 };
 
-                println!("size {} consumed {} redundancy {}", size, consumed, redundancy);
+                println!("consumed {} redundancy {}", consumed, redundancy);
 
                 if redundancy {
                     let redundancy_pos = rd.decode_logp(1);
@@ -233,18 +233,18 @@ mod test {
         }
     }
 
-    #[interpolate_test(1, 1)]
-    #[interpolate_test(2, 2)]
-    #[interpolate_test(3, 3)]
-    #[interpolate_test(4, 4)]
-    #[interpolate_test(5, 5)]
-    #[interpolate_test(6, 6)]
-    #[interpolate_test(7, 7)]
-    #[interpolate_test(8, 8)]
-    #[interpolate_test(9, 9)]
-    #[interpolate_test(10, 10)]
-    #[interpolate_test(11, 11)]
-    #[interpolate_test(12, 12)]
+    #[interpolate_test(n01, 1)]
+    #[interpolate_test(n02, 2)]
+    #[interpolate_test(n03, 3)]
+    #[interpolate_test(n04, 4)]
+    #[interpolate_test(n05, 5)]
+    #[interpolate_test(n06, 6)]
+    #[interpolate_test(n07, 7)]
+    #[interpolate_test(n08, 8)]
+    #[interpolate_test(n09, 9)]
+    #[interpolate_test(n10, 10)]
+    #[interpolate_test(n11, 11)]
+    #[interpolate_test(n12, 12)]
     fn send_packet(index: usize) {
         let p = env!("CARGO_MANIFEST_DIR");
         let mut d = PathBuf::from(p);

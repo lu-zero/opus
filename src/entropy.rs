@@ -275,6 +275,7 @@ impl<'a> RangeDecoder<'a> {
 pub trait CeltOnly {
     fn rawbits(&mut self, len: usize) -> usize;
     fn decode_uniform(&mut self, len: usize) -> usize;
+    fn decode_laplace(&mut self, symbol: usize, decay: isize) -> isize;
     fn to_end(&mut self);
 }
 
@@ -303,6 +304,43 @@ impl<'a> CeltOnly for RangeDecoder<'a> {
         } else {
             k
         }
+    }
+
+    fn decode_laplace(&mut self, mut symbol: usize, decay: isize) -> isize {
+        let scale = self.range >> 15;
+        let center = self.value / scale + 1;
+        let center = (1 << 15) - center.min(1 << 15);
+
+        let (value, low) = if center >= symbol {
+            let mut value = 0;
+            let mut low = symbol;
+
+            while symbol > 1 && center >= low + 2 * symbol {
+                value += 1;
+                low += symbol;
+                symbol = (((symbol - 2) * decay) >> 15) + 1;
+            }
+
+            if symbol <= 1 {
+                let dist = (center - low) >> 1;
+                value += dist;
+                low += 2 * dist;
+            }
+
+            if center < low + symbol {
+                value *= -1;
+            } else {
+                low += symbol;
+            }
+
+            (value, low)
+        } else {
+            (0, 0)
+        };
+
+        self.update(scale, low, 32768.min(low + symbol), 32768);
+
+        value
     }
 
     fn to_end(&mut self) {
