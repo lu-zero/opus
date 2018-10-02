@@ -58,7 +58,7 @@ pub struct Celt {
     fine_bits: [usize; MAX_BANDS],
     fine_priority: [usize; MAX_BANDS],
     pulses: [usize; MAX_BANDS],
-    tf_change: [usize; MAX_BANDS],
+    tf_change: [i8; MAX_BANDS],
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -140,6 +140,41 @@ const MODEL_ENERGY_SMALL: &ICDFContext = &ICDFContext {
     total: 4,
     dist: &[2, 3, 4],
 };
+
+const TF_SELECT: &[[[[i8;2];2];2]] = &[
+    [
+        [
+            [0, -1], [0, -1]
+        ],
+        [
+            [0, -1], [0, -1]
+        ],
+    ],
+    [
+        [
+            [0, -1], [0, -2]
+        ],
+        [
+            [1, 0], [1, -1]
+        ],
+    ],
+    [
+        [
+            [0, -2], [0, -3]
+        ],
+        [
+            [2, 0], [1, -1]
+        ],
+    ],
+    [
+        [
+            [0, -2], [0, -3]
+        ],
+        [
+            [3, 0], [1, -1]
+        ],
+    ],
+];
 
 impl Celt {
     pub fn new(stereo: bool) -> Self {
@@ -282,6 +317,46 @@ impl Celt {
         println!("{:#.6?}", &frames[1].energy[..]);
     }
 
+    fn decode_tf_changes(&mut self, rd: &mut RangeDecoder, band: Range<usize>, transient: bool) {
+        let mut tf_changed = [false; MAX_BANDS];
+        let bits = if transient { (2, 4) } else { (4, 5) };
+        let mut available = rd.available();
+
+        let tf_select = TF_SELECT[self.lm][transient as usize];
+
+        let select_bit = self.lm != 0 && available > bits.0;
+        println!("select_bit {} {}", select_bit, available);
+
+        let mut field_bits = bits.0;
+        let mut diff = false;
+        let mut changed = false;
+        for (i, tf_change) in tf_changed[band.clone()].iter_mut().enumerate() {
+            if available > field_bits + select_bit as usize {
+                diff ^= rd.decode_logp(field_bits);
+                println!("band {} bits {} {}", i, field_bits, diff);
+                available = rd.available();
+                changed |= diff;
+            }
+
+            *tf_change = diff;
+            field_bits = bits.1;
+        }
+
+        let select = if select_bit && tf_select[0][changed as usize] != tf_select[1][changed as usize] {
+            rd.decode_logp(1)
+        } else {
+            false
+        };
+        {
+            let tf_change = self.tf_change[band.clone()].iter_mut();
+
+            for (tf, &changed) in tf_change.zip(tf_changed[band.clone()].iter()) {
+                *tf = tf_select[select as usize][changed as usize];
+            }
+        }
+        println!("tf_change {:#?}", &self.tf_change[band]);
+    }
+
     fn decode_fine_energy(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
         self.frames.iter_mut().for_each(|f| {
             let energy = f.energy.iter_mut().enumerate();
@@ -344,7 +419,8 @@ impl Celt {
             .iter_mut()
             .for_each(|f| f.collapse_masks.iter_mut().for_each(|c| *c = 0));
 
-        self.decode_coarse_energy(rd, band);
+        self.decode_coarse_energy(rd, band.clone());
+        self.decode_tf_changes(rd, band.clone(), transient);
     }
 }
 
