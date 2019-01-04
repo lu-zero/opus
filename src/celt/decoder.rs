@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::mem;
 
 use entropy::*;
 use maths::*;
@@ -7,6 +8,11 @@ use packet::*;
 const SHORT_BLOCKSIZE: usize = 120;
 const MAX_BANDS: usize = 21;
 const MIN_PERIOD: usize = 15;
+
+const SPREAD_NONE: usize = 0;
+const SPREAD_LIGHT: usize = 1;
+const SPREAD_NORMAL: usize = 2;
+const SPREAD_AGGRESSIVE: usize = 3;
 
 #[derive(Debug, Default)]
 struct PostFilter {
@@ -54,11 +60,16 @@ pub struct Celt {
     lm: usize, // aka duration in mdct blocks
     band: Range<usize>,
     frames: [CeltFrame; 2],
+    spread: usize,
 
     fine_bits: [usize; MAX_BANDS],
     fine_priority: [usize; MAX_BANDS],
-    pulses: [usize; MAX_BANDS],
+    pulses: [i32; MAX_BANDS],
     tf_change: [i8; MAX_BANDS],
+
+    anticollapse_bit: usize,
+    blocks: usize,
+    blocksize: usize,
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -136,6 +147,43 @@ const COARSE_ENERGY_INTER: &[&[u8]] = &[
     ],
 ];
 
+const STATIC_CAPS: &[&[&[u8]]] = &[
+    // 120-sample
+    &[
+        &[224, 224, 224, 224, 224, 224, 224, 224, 160, 160,
+         160, 160, 185, 185, 185, 178, 178, 168, 134,  61,  37],
+        &[224, 224, 224, 224, 224, 224, 224, 224, 240, 240,
+         240, 240, 207, 207, 207, 198, 198, 183, 144,  66,  40],
+    ],
+    // 240-sample
+    &[
+        &[160, 160, 160, 160, 160, 160, 160, 160, 185, 185,
+         185, 185, 193, 193, 193, 183, 183, 172, 138,  64,  38],
+        &[240, 240, 240, 240, 240, 240, 240, 240, 207, 207,
+         207, 207, 204, 204, 204, 193, 193, 180, 143,  66,  40],
+    ],
+    // 480-sample
+    &[
+        &[185, 185, 185, 185, 185, 185, 185, 185, 193, 193,
+         193, 193, 193, 193, 193, 183, 183, 172, 138,  65,  39],
+        &[207, 207, 207, 207, 207, 207, 207, 207, 204, 204,
+         204, 204, 201, 201, 201, 188, 188, 176, 141,  66,  40],
+    ],
+    // 960-sample
+    &[
+        &[193, 193, 193, 193, 193, 193, 193, 193, 193, 193,
+         193, 193, 194, 194, 194, 184, 184, 173, 139,  65,  39],
+        &[204, 204, 204, 204, 204, 204, 204, 204, 201, 201,
+         201, 201, 198, 198, 198, 187, 187, 175, 140,  66,  40]
+    ],
+];
+
+
+const FREQ_RANGE: &[u8] = &[
+    1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  4,  4,  4,  6,  6,  8, 12, 18, 22
+];
+
+
 const MODEL_ENERGY_SMALL: &ICDFContext = &ICDFContext {
     total: 4,
     dist: &[2, 3, 4],
@@ -176,6 +224,35 @@ const TF_SELECT: &[[[[i8;2];2];2]] = &[
     ],
 ];
 
+const MODEL_SPREAD: &ICDFContext = &ICDFContext {
+    total: 32,
+    dist: &[7, 9, 30, 32]
+};
+
+
+const ALLOC_TRIM: &ICDFContext = &ICDFContext {
+    total: 128,
+    dist: &[2,   4,   9,  19,  41,  87, 109, 119, 124, 126, 128]
+};
+
+const LOG2_FRAC: &[u8] = &[
+    0, 8, 13, 16, 19, 21, 23, 24, 26, 27, 28, 29, 30, 31, 32, 32, 33, 34, 34, 35, 36, 36, 37, 37
+];
+
+const STATIC_ALLOC: &[[u8; 21]; 11] = &[  /* 1/32 bit/sample */
+    [   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 ],
+    [  90,  80,  75,  69,  63,  56,  49,  40,  34,  29,  20,  18,  10,   0,   0,   0,   0,   0,   0,   0,   0 ],
+    [ 110, 100,  90,  84,  78,  71,  65,  58,  51,  45,  39,  32,  26,  20,  12,   0,   0,   0,   0,   0,   0 ],
+    [ 118, 110, 103,  93,  86,  80,  75,  70,  65,  59,  53,  47,  40,  31,  23,  15,   4,   0,   0,   0,   0 ],
+    [ 126, 119, 112, 104,  95,  89,  83,  78,  72,  66,  60,  54,  47,  39,  32,  25,  17,  12,   1,   0,   0 ],
+    [ 134, 127, 120, 114, 103,  97,  91,  85,  78,  72,  66,  60,  54,  47,  41,  35,  29,  23,  16,  10,   1 ],
+    [ 144, 137, 130, 124, 113, 107, 101,  95,  88,  82,  76,  70,  64,  57,  51,  45,  39,  33,  26,  15,   1 ],
+    [ 152, 145, 138, 132, 123, 117, 111, 105,  98,  92,  86,  80,  74,  67,  61,  55,  49,  43,  36,  20,   1 ],
+    [ 162, 155, 148, 142, 133, 127, 121, 115, 108, 102,  96,  90,  84,  77,  71,  65,  59,  53,  46,  30,   1 ],
+    [ 172, 165, 158, 152, 143, 137, 131, 125, 118, 112, 106, 100,  94,  87,  81,  75,  69,  63,  56,  45,  20 ],
+    [ 200, 200, 200, 200, 200, 200, 200, 200, 198, 193, 188, 183, 178, 173, 168, 163, 158, 153, 148, 129, 104 ]
+];
+
 impl Celt {
     pub fn new(stereo: bool) -> Self {
         let frames = Default::default();
@@ -186,10 +263,14 @@ impl Celt {
             lm: 0,
             frames,
             band: 0..MAX_BANDS,
+            spread: SPREAD_NORMAL,
             fine_bits: Default::default(),
             fine_priority: Default::default(),
             pulses: Default::default(),
             tf_change: Default::default(),
+            anticollapse_bit: 0,
+            blocks: 0,
+            blocksize: 0,
         }
     }
 
@@ -363,6 +444,255 @@ impl Celt {
         });
     }
 
+    fn decode_allocation(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
+        let mut caps: [i32; MAX_BANDS] = unsafe { mem::uninitialized() };
+        let mut threshold = [0; MAX_BANDS];
+        let mut trim_offset = [0; MAX_BANDS];
+        let mut boost = [0; MAX_BANDS];
+        let scale = self.lm + self.stereo_pkt as usize;
+        let mut skip_startband = band.start;
+
+        let spread = if rd.available() > 4 {
+            rd.decode_icdf(MODEL_SPREAD)
+        } else {
+            SPREAD_NORMAL
+        };
+
+        let static_caps = &STATIC_CAPS[self.lm][self.stereo_pkt as usize];
+
+        caps.iter_mut().zip(static_caps.iter().zip(FREQ_RANGE.iter()))
+            .for_each(|(cap, (&static_cap, &freq_range)) | {
+            *cap = (static_cap as i32 + 64) * (freq_range as i32) << scale >> 2;
+        });
+
+        println!("caps {:#?}", &caps[..]);
+
+        let mut dynalloc = 6;
+        let mut boost_size = 0;
+
+        println!("consumed {}", rd.tell_frac());
+
+        for i in band.clone() {
+            let quanta = FREQ_RANGE[i] << scale;
+            let quanta = (quanta << 3).min(quanta.max(6 << 3)) as i32;
+            let mut band_dynalloc = dynalloc;
+            while (band_dynalloc << 3) + boost_size < rd.available_frac() && boost[i] < caps[i] {
+                let add = rd.decode_logp(band_dynalloc);
+                if !add {
+                    break;
+                }
+                boost[i] += quanta;
+                boost_size += quanta as usize;
+                band_dynalloc = 1;
+            }
+
+            if boost[i] != 0 && dynalloc > 2 {
+                dynalloc -= 1;
+            }
+        }
+
+        let alloc_trim = if rd.available_frac() > boost_size + (6 << 3) {
+            rd.decode_icdf(ALLOC_TRIM)
+        } else {
+            5
+        } as i32;
+
+        println!("alloc_trim {}", alloc_trim);
+
+        let mut available = rd.available_frac() - 1;
+        self.anticollapse_bit = if self.blocks > 1 && self.lm >= 2 && available >= (self.lm + 2) << 3 {
+            available -= 1 << 3;
+            1 << 3
+        } else {
+            0
+        };
+
+        println!("anticollapse_bit {}", self.anticollapse_bit);
+
+        let skip_bit = if available >= 1 << 3 {
+            available -= 1 << 3;
+            1 << 3
+        } else {
+            0
+        };
+
+        println!("skip_bit {}", skip_bit);
+
+
+        let (intensity_stereo_bit, dual_stereo_bit) = if self.stereo_pkt {
+            let intensity_stereo = LOG2_FRAC[band.end - band.start] as usize;
+            if intensity_stereo <= available {
+                available -= intensity_stereo;
+                let dual_stereo = if available >= 1 << 3 {
+                    available -= 1 << 3;
+                    1 << 3
+                } else {
+                    0
+                };
+                (intensity_stereo, dual_stereo)
+            } else {
+                (0, 0)
+            }
+        } else {
+            (0, 0)
+        };
+
+        println!("intensity_stereo_bit {}", intensity_stereo_bit);
+
+        for i in band.clone() {
+            let trim = alloc_trim - (5 + self.lm) as i32;
+            let range = FREQ_RANGE[i] as i32 * (band.end - i - 1) as i32;
+            let lm = self.lm + 3;
+            let scale = lm as i32 + self.stereo_pkt as i32;
+            let stereo_threshold = (self.stereo_pkt as i32) << 8;
+
+            threshold[i] = ((3 * FREQ_RANGE[i] as i32) << lm >> 4).max(stereo_threshold);
+
+            trim_offset[i] = trim * (range << scale) >> 6;
+
+            if FREQ_RANGE[i] << self.lm == 1 {
+                trim_offset[i] -= stereo_threshold;
+            }
+
+            println!("trim_offset {} {}", i, trim_offset[i]);
+        }
+
+
+        const CELT_VECTOR: usize = 11;
+        let coded_channel_bits = (self.stereo_pkt as i32 + 1) << 3;
+
+        let mut low = 1;
+        let mut high = CELT_VECTOR - 1;
+        while low <= high {
+            let center = (low + high) / 2;
+            let mut done = false;
+            let mut total = 0;
+
+            for i in band.clone().rev() {
+                let bandbits = (FREQ_RANGE[i] as i32 * STATIC_ALLOC[center][i] as i32)
+                    << (self.stereo_pkt as i32)
+                    << self.lm >> 2;
+
+                println!("bandbits {}", bandbits);
+
+                let bandbits = if bandbits != 0 {
+                    (bandbits + trim_offset[i]).max(0)
+                } else {
+                    bandbits
+                } + boost[i];
+
+                if bandbits >= threshold[i] || done {
+                    done = true;
+                    total += bandbits.min(caps[i]);
+                } else {
+                    if bandbits >= coded_channel_bits {
+                        total += coded_channel_bits;
+                    }
+                }
+
+                println!("total {} {}", total, available);
+
+            }
+
+            if total as usize > available {
+                high = center - 1;
+            } else {
+                low = center + 1;
+            }
+            println!("{} {} {}", high, low, center);
+        }
+
+        println!("high {} low {}", high, low);
+
+        high = low;
+        low -= 1;
+
+        let mut bits1 = [0; MAX_BANDS];
+        let mut bits2 = [0; MAX_BANDS];
+
+        println!("high {} low {}", high, low);
+
+        for i in band.clone() {
+            let bits_estimation = |idx: usize| -> i32 {
+                let bits = (FREQ_RANGE[i] as i32 * STATIC_ALLOC[idx][i] as i32)
+                    << (self.stereo_pkt as i32)
+                    << self.lm >> 2;
+                if bits != 0 {
+                    (bits + trim_offset[i]).max(0)
+                } else {
+                    bits
+                }
+            };
+            bits1[i] = bits_estimation(low);
+            bits2[i] = bits_estimation(high);
+
+            if boost[i] != 0 {
+                if low != 0 {
+                    bits1[i] += boost[i];
+                }
+
+                bits2[i] += boost[i];
+
+                skip_startband = i;
+            }
+
+            bits2[i] = (bits2[i] - bits1[i]).max(0);
+            println!("bits2 {}", bits2[i]);
+        }
+
+        const ALLOC_STEPS: usize = 6;
+
+        low = 0;
+        high = 1 << ALLOC_STEPS;
+
+        for i in 0 .. ALLOC_STEPS {
+            let center = (low + high) / 2;
+            let mut done = false;
+            let mut total = 0;
+
+            for j in band.clone().rev() {
+                let bits = bits1[j] + (center as i32 * bits2[j] >> ALLOC_STEPS);
+
+                if bits >= threshold[j] || done {
+                    done = true;
+                    total += bits.min(caps[j]);
+                } else if bits >= coded_channel_bits {
+                    total += coded_channel_bits;
+                }
+            }
+
+            if (total as usize > available) {
+                high = center;
+            } else {
+                low = center;
+            }
+        }
+
+        let mut done = false;
+        let mut total = 0;
+
+        for i in band.clone().rev() {
+            let mut bits = bits1[i] + (low as i32 * bits2[i] >> ALLOC_STEPS);
+
+            if bits >= threshold[i] || done {
+                done = true;
+            } else {
+                bits = if bits >= coded_channel_bits {
+                    coded_channel_bits
+                } else {
+                    0
+                }
+            }
+
+            let bits = bits.min(caps[i]);
+            self.pulses[i] = bits;
+            total += bits;
+
+            println!("total {}", total);
+        }
+
+    }
+
     pub fn decode(
         &mut self,
         rd: &mut RangeDecoder,
@@ -402,8 +732,8 @@ impl Celt {
 
         println!("duration {}, transient {}", self.lm, transient);
 
-        let blocks = if transient { 1 << self.lm } else { 1 };
-        let blocksize = frame_size / blocks;
+        self.blocks = if transient { 1 << self.lm } else { 1 };
+        self.blocksize = frame_size / self.blocks;
 
         if !self.stereo_pkt {
             let (f0, f1) = self.frames.split_at_mut(1);
@@ -421,6 +751,7 @@ impl Celt {
 
         self.decode_coarse_energy(rd, band.clone());
         self.decode_tf_changes(rd, band.clone(), transient);
+        self.decode_allocation(rd, band.clone());
     }
 }
 

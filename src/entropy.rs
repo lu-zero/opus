@@ -360,8 +360,8 @@ impl<'a> RangeDecoder<'a> {
         let (scale, sym) = self.get_scale_symbol(total);
         let k = dist.iter().position(|v| *v > sym).unwrap();
         println!(
-            "icdf val {} range {} k {} dist {:?}",
-            self.value, self.range, k, dist
+            "icdf val {} range {} k {}" /* dist {:?}" */,
+            self.value, self.range, k, /* dist */
         );
         let high = dist[k];
         let low = if k > 0 { dist[k - 1] } else { 0 };
@@ -382,12 +382,10 @@ impl<'a> RangeDecoder<'a> {
         let mut rq15 = self.range >> (lg - 16);
 
         for _ in 0..3 {
-            rq15 = (rq15 * rq15) >> (lg - 16);
+            rq15 = (rq15 * rq15) >> 15;
             let lastbit = rq15 >> 16;
-            lg = lg * 2 + lastbit;
-            if lastbit != 0 {
-                rq15 >>= 1;
-            }
+            lg = lg * 2 | lastbit;
+            rq15 >>= lastbit;
         }
 
         self.total * 8 - lg
@@ -396,6 +394,11 @@ impl<'a> RangeDecoder<'a> {
     #[inline(always)]
     pub fn available(&self) -> usize {
         self.size_in_bits - self.tell()
+    }
+
+    #[inline(always)]
+    pub fn available_frac(&self) -> usize {
+        self.size_in_bits * 8 - self.tell_frac()
     }
 }
 
