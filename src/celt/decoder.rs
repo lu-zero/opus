@@ -73,6 +73,8 @@ pub struct Celt {
 
     intensity_stereo: usize,
     dual_stereo: bool,
+
+    remaining: i32,
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -286,6 +288,7 @@ impl Celt {
             blocksize: 0,
             intensity_stereo: 0,
             dual_stereo: false,
+            remaining: 0,
         }
     }
 
@@ -451,12 +454,6 @@ impl Celt {
             }
         }
         println!("tf_change {:#?}", &self.tf_change[band]);
-    }
-
-    fn decode_fine_energy(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
-        self.frames.iter_mut().for_each(|f| {
-            let energy = f.energy.iter_mut().enumerate();
-        });
     }
 
     fn decode_allocation(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
@@ -868,6 +865,22 @@ impl Celt {
         }
     }
 
+    fn decode_fine_energy(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
+        for i in band {
+            if self.fine_bits[i] == 0 {
+                continue;
+            }
+
+            for f in 0..self.stereo_pkt as usize + 1 {
+                let frame = &mut self.frames[f];
+                let q2 = rd.rawbits(self.fine_bits[i] as usize) as f32;
+                let offset = (q2 + 0.5) * (1 << (14 - self.fine_bits[i])) as f32 / 16384.0 - 0.5;
+                println!("q2 {}", q2);
+                frame.energy[i] += offset;
+            }
+        }
+    }
+
     pub fn decode(
         &mut self,
         rd: &mut RangeDecoder,
@@ -927,6 +940,7 @@ impl Celt {
         self.decode_coarse_energy(rd, band.clone());
         self.decode_tf_changes(rd, band.clone(), transient);
         self.decode_allocation(rd, band.clone());
+        self.decode_fine_energy(rd, band.clone());
     }
 }
 
