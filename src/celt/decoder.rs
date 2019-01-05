@@ -62,14 +62,17 @@ pub struct Celt {
     frames: [CeltFrame; 2],
     spread: usize,
 
-    fine_bits: [usize; MAX_BANDS],
-    fine_priority: [usize; MAX_BANDS],
+    fine_bits: [i32; MAX_BANDS],
+    fine_priority: [bool; MAX_BANDS],
     pulses: [i32; MAX_BANDS],
     tf_change: [i8; MAX_BANDS],
 
     anticollapse_bit: usize,
     blocks: usize,
     blocksize: usize,
+
+    intensity_stereo: usize,
+    dual_stereo: bool,
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -253,6 +256,16 @@ const STATIC_ALLOC: &[[u8; 21]; 11] = &[  /* 1/32 bit/sample */
     [ 200, 200, 200, 200, 200, 200, 200, 200, 198, 193, 188, 183, 178, 173, 168, 163, 158, 153, 148, 129, 104 ]
 ];
 
+const FREQ_BANDS: &[u8] = &[
+    0,  1,  2,  3,  4,  5,  6,  7,  8, 10, 12, 14, 16, 20, 24, 28, 34, 40, 48, 60, 78, 100
+];
+
+const LOG_FREQ_RANGE: &[u8] = &[
+    0,  0,  0,  0,  0,  0,  0,  0,  8,  8,  8,  8, 16, 16, 16, 21, 21, 24, 29, 34, 36
+];
+
+const MAX_FINE_BITS: i32 = 8;
+
 impl Celt {
     pub fn new(stereo: bool) -> Self {
         let frames = Default::default();
@@ -271,6 +284,8 @@ impl Celt {
             anticollapse_bit: 0,
             blocks: 0,
             blocksize: 0,
+            intensity_stereo: 0,
+            dual_stereo: false,
         }
     }
 
@@ -519,7 +534,7 @@ impl Celt {
         println!("skip_bit {}", skip_bit);
 
 
-        let (intensity_stereo_bit, dual_stereo_bit) = if self.stereo_pkt {
+        let (mut intensity_stereo_bit, dual_stereo_bit) = if self.stereo_pkt {
             let intensity_stereo = LOG2_FRAC[band.end - band.start] as usize;
             if intensity_stereo <= available {
                 available -= intensity_stereo;
@@ -661,7 +676,7 @@ impl Celt {
                 }
             }
 
-            if (total as usize > available) {
+            if total as usize > available {
                 high = center;
             } else {
                 low = center;
@@ -691,6 +706,166 @@ impl Celt {
             println!("total {}", total);
         }
 
+
+        let mut bands = band.clone().rev();
+
+        let codedband = loop {
+            let j = bands.next().unwrap();
+            let codedband = j + 1;
+
+            println!("codedband {} {}", codedband, j);
+            if j == skip_startband {
+                available += skip_bit;
+                break codedband;
+            }
+
+            let band_delta = (FREQ_BANDS[codedband] - FREQ_BANDS[band.start]) as i32;
+            let (bits, remaining) = {
+                let remaining = available as i32 - total;
+                let bits = remaining / band_delta;
+                (bits, remaining - bits * band_delta)
+            };
+            let mut allocation = self.pulses[j] + bits * FREQ_BANDS[j] as i32 + 0.max(remaining - band_delta);
+
+            if allocation >= threshold[j].max(coded_channel_bits) {
+                if rd.decode_logp(1) {
+                    break codedband;
+                }
+
+                total += 1 << 3;
+                allocation -= 1 << 3;
+            }
+
+            total -= self.pulses[j];
+            if intensity_stereo_bit != 0 {
+                total -= intensity_stereo_bit as i32;
+                intensity_stereo_bit = LOG2_FRAC[j - band.start] as usize;
+                total += intensity_stereo_bit as i32;
+            }
+
+            self.pulses[j] = if allocation >= coded_channel_bits {
+                coded_channel_bits
+            } else {
+                0
+            };
+
+            total += self.pulses[j];
+
+            println!("band skip total {}", total);
+        };
+
+        self.intensity_stereo = if intensity_stereo_bit != 0 {
+            band.start + rd.decode_uniform(codedband + 1 - band.start)
+        } else {
+            0
+        };
+
+        self.dual_stereo = if self.intensity_stereo <= band.start {
+            available += dual_stereo_bit;
+            false
+        } else if dual_stereo_bit != 0 {
+            rd.decode_logp(1)
+        } else {
+            false
+        };
+
+        println!("intensity {}, dual {}", self.intensity_stereo, self.dual_stereo as usize);
+
+
+        let band_delta = (FREQ_BANDS[codedband] - FREQ_BANDS[band.start]) as i32;
+        let (bandbits, mut remaining) = {
+            let remaining = available as i32 - total;
+            let bits = remaining / band_delta;
+            (bits, remaining - bits * band_delta)
+        };
+
+        for i in band.clone() {
+            let freq_range = FREQ_RANGE[i] as i32;
+            let bits = remaining.min(freq_range);
+
+            self.pulses[i] += bits + bandbits * freq_range;
+            remaining -= bits;
+        }
+
+        println!("remaining {}", remaining);
+
+        let mut extrabits = 0;
+
+        const FINE_OFFSET: i32 = 21;
+
+        for i in band.clone() {
+            let n = (FREQ_RANGE[i] as i32) << self.lm;
+            let prev_extra = extrabits;
+            self.pulses[i] += extrabits;
+
+            if n > 1 {
+                extrabits = 0.max(self.pulses[i] - caps[i]);
+                self.pulses[i] -= extrabits;
+
+                let dof = n * (self.stereo_pkt as i32 + 1)
+                    + (self.stereo_pkt && n > 2 && !self.dual_stereo && i < self.intensity_stereo) as i32;
+                let duration = (self.lm << 3) as i32;
+                let dof_channels = dof * (LOG_FREQ_RANGE[i] as i32 + duration);
+                let mut offset = (dof_channels >> 1) - dof * FINE_OFFSET;
+
+                println!("dof {} {} {}", dof, dof_channels, offset);
+
+                if n == 2 {
+                    offset += dof << 1;
+                }
+
+                let pulse = self.pulses[i] + offset;
+                if pulse < 2 * (dof << 3) {
+                    offset += dof_channels >> 2;
+                } else if pulse < 3 * (dof << 3) {
+                    offset += dof_channels >> 3;
+                }
+
+                let pulse = self.pulses[i] + offset;
+
+                let fine_bits = (pulse + (dof << 2)) / (dof << 3);
+                println!("pulses {}, offset {}", self.pulses[i], offset);
+                let max_bits = (self.pulses[i] >> 3) >> (self.stereo_pkt as usize);
+                let max_bits = max_bits.min(MAX_FINE_BITS).max(0);
+
+                self.fine_bits[i] = fine_bits.max(0).min(max_bits);
+                println!("fine_bits {} {}", fine_bits, self.fine_bits[i]);
+                self.fine_priority[i] = self.fine_bits[i] * (dof << 3) >= pulse;
+
+                self.pulses[i] -= self.fine_bits[i] << (self.stereo_pkt as usize) << 3;
+            } else {
+                extrabits = (self.pulses[i] - ((self.stereo_pkt as i32 + 1) << 3)).max(0);
+                self.pulses[i] -= extrabits;
+                self.fine_bits[i] = 0;
+                self.fine_priority[i] = true;
+            }
+
+            if extrabits > 0 {
+                let scale = self.stereo_pkt as usize + 1 + 2;
+                let extra_fine = (MAX_FINE_BITS - self.fine_bits[i])
+                    .min(extrabits >> scale);
+
+                self.fine_bits[i] += extra_fine;
+
+                let extra_fine = extra_fine << scale;
+                self.fine_priority[i] = extra_fine >= extrabits - prev_extra;
+
+                extrabits -= extra_fine;
+            }
+
+            println!("extrabits {}", extrabits);
+            println!("fine_bits {}", self.fine_bits[i]);
+        }
+
+        self.remaining = extrabits;
+
+        for i in codedband .. band.end {
+            self.fine_bits[i] = self.pulses[i] >> (self.stereo_pkt as usize) >> 3;
+            self.pulses[i] = 0;
+            self.fine_priority[i] = self.fine_bits[i] < 1;
+
+            println!("fine_bits end {}", self.fine_bits[i]);
+        }
     }
 
     pub fn decode(
