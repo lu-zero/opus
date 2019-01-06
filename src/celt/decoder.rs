@@ -6,6 +6,10 @@ use maths::*;
 use packet::*;
 
 const SHORT_BLOCKSIZE: usize = 120;
+const OVERLAP: usize = SHORT_BLOCKSIZE;
+const MAX_LOG_BLOCKS: usize = 3;
+const MAX_FRAME_SIZE: usize = SHORT_BLOCKSIZE * (1 << MAX_LOG_BLOCKS);
+
 const MAX_BANDS: usize = 21;
 const MIN_PERIOD: usize = 15;
 
@@ -52,7 +56,7 @@ impl Default for CeltFrame {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Celt {
     stereo: bool,
     stereo_pkt: bool,
@@ -75,6 +79,7 @@ pub struct Celt {
     dual_stereo: bool,
 
     remaining: i32,
+    coeffs: [[f32; MAX_FRAME_SIZE]; 2],
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -268,6 +273,21 @@ const LOG_FREQ_RANGE: &[u8] = &[
 
 const MAX_FINE_BITS: i32 = 8;
 
+fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
+    use std::f32::consts::FRAC_1_SQRT_2;
+
+    buf.chunks_exact_mut(2 * stride).take(n0 / 2).for_each(|l| {
+        let (l0, l1) = l.split_at_mut(stride);
+
+        l0.iter_mut().zip(l1.iter_mut()).for_each(|(e0, e1)| {
+            let v0 = (*e0 + *e1) * FRAC_1_SQRT_2;
+            let v1 = (*e0 - *e1) * FRAC_1_SQRT_2;
+            *e0 = v0;
+            *e1 = v1;
+        });
+    });
+}
+
 impl Celt {
     pub fn new(stereo: bool) -> Self {
         let frames = Default::default();
@@ -289,6 +309,7 @@ impl Celt {
             intensity_stereo: 0,
             dual_stereo: false,
             remaining: 0,
+            coeffs: unsafe { mem::zeroed() },
         }
     }
 
@@ -881,6 +902,21 @@ impl Celt {
         }
     }
 
+    /*
+    fn decode_bands(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
+        // TODO: doublecheck it is really needed.
+        self.coeffs.iter_mut().for_each(|v| v.iter_mut().for_each(|val| *val = 0));
+
+        for i in band.clone() {
+            let band_offset = (FREQ_BANDS[i] as i32) << self.lm;
+            let band_size = (FREQ_RANGE[i] as i32) << self.lm;
+
+            let x = &mut self.coeffs[0][band_offset];
+            let y = &mut self.
+
+        }
+    }
+*/
     pub fn decode(
         &mut self,
         rd: &mut RangeDecoder,
@@ -941,7 +977,53 @@ impl Celt {
         self.decode_tf_changes(rd, band.clone(), transient);
         self.decode_allocation(rd, band.clone());
         self.decode_fine_energy(rd, band.clone());
+        // self.decode_bands(rd, band.clone());
     }
 }
 
-mod test {}
+#[cfg(test)]
+mod test {
+    fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
+        use std::f32::consts::FRAC_1_SQRT_2;
+
+        let n0 = n0 / 2;
+
+        for i in 0 .. stride {
+            for j in 0 .. n0 {
+                let x0 = buf[stride * (2 * j) + i];
+                let x1 = buf[stride * (2 * j + 1) + i];
+                buf[stride * (2 * j) + i] = (x0 + x1) * FRAC_1_SQRT_2;
+                buf[stride * (2 * j + 1) + i] = (x0 - x1) * FRAC_1_SQRT_2;
+            }
+        }
+    }
+
+    #[test]
+    fn haar1_32_1() {
+        let mut a = [
+           -1.414214, -1.414214, -1.414214, 0.000000, -1.414214, 0.000000, 0.000000, 0.000000, -1.414214, 1.414214, 1.414214, 0.000000, 1.414214, 0.000000, 0.000000, 0.000000, -0.017331, -1.403810, -0.089228, -0.005500, -1.511374, -0.243906, 1.517055, -0.095944, 1.476075, 0.257181, -0.201957, 1.363608, -0.037285, 1.601090, 0.258849, -1.609220,
+        ];
+        let mut b = a.clone();
+
+        super::haar1(&mut a, 32, 1);
+        haar1(&mut b, 32, 1);
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn haar1_16_2() {
+        let mut a = [
+            -2.0000, 0.0000, -1.0000, -1.0000, -1.0000, -1.0000, 0.0000, 0.0000, 0.0000, -2.0000,
+            1.0000, 1.0000, 1.0000, 1.0000, 0.0000, 0.0000, -1.0049, 0.9804, -0.0670, -0.0592,
+            -1.2412, -0.8962, 1.0049, 1.1406, 1.2256, 0.8619, 0.8214, -1.1070, 1.1058, -1.1585,
+            -0.9549, 1.3209,
+        ];
+        let mut b = a.clone();
+
+        super::haar1(&mut a, 16, 2);
+        haar1(&mut b, 16, 2);
+
+        assert_eq!(a, b);
+    }
+}
