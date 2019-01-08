@@ -79,7 +79,10 @@ pub struct Celt {
     dual_stereo: bool,
 
     remaining: i32,
-    coeffs: [[f32; MAX_FRAME_SIZE]; 2],
+    remaining2: i32,
+    coeff0: [f32; MAX_FRAME_SIZE],
+    coeff1: [f32; MAX_FRAME_SIZE],
+    codedband: usize,
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -273,6 +276,10 @@ const LOG_FREQ_RANGE: &[u8] = &[
 
 const MAX_FINE_BITS: i32 = 8;
 
+const BIT_INTERLEAVE: &[u8] = &[
+    0, 1, 1, 1, 2, 3, 3, 3, 2, 3, 3, 3, 2, 3, 3, 3
+];
+
 fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
     use std::f32::consts::FRAC_1_SQRT_2;
 
@@ -286,6 +293,55 @@ fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
             *e1 = v1;
         });
     });
+}
+
+const HADAMARD_ORDERY: &[usize] = &[
+    1,   0,
+    3,   0,  2,  1,
+    7,   0,  4,  3,  6,  1,  5,  2,
+    15,  0,  8,  7, 12,  3, 11,  4, 14,  1,  9,  6, 13,  2, 10,  5
+];
+
+fn interleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride: usize, hadamard: bool) {
+    let size = n0 * stride;
+
+    if hadamard {
+        let shuffle = &HADAMARD_ORDERY[stride - 2..];
+        for i in 0 .. stride {
+            for j in 0 .. n0 {
+                scratch[j * stride + i] = buf[shuffle[i] * n0 + j];
+            }
+        }
+    } else {
+        for i in 0 .. stride {
+            for j in 0 .. n0 {
+                scratch[j * stride + i] = buf[i * n0 + j];
+            }
+        }
+    }
+
+    buf[..size].copy_from_slice(&scratch[..size]);
+}
+
+fn deinterleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride: usize, hadamard: bool) {
+    let size = n0 * stride;
+
+    if hadamard {
+        let shuffle = &HADAMARD_ORDERY[stride - 2..];
+        for i in 0 .. stride {
+            for j in 0 .. n0 {
+                scratch[shuffle[i] * n0 + j] = buf[j * stride + i];
+            }
+        }
+    } else {
+        for i in 0 .. stride {
+            for j in 0 .. n0 {
+                scratch[i * n0 + j] = buf[j * stride + i];
+            }
+        }
+    }
+
+    buf[..size].copy_from_slice(&scratch[..size]);
 }
 
 impl Celt {
@@ -308,8 +364,11 @@ impl Celt {
             blocksize: 0,
             intensity_stereo: 0,
             dual_stereo: false,
+            codedband: 0,
             remaining: 0,
-            coeffs: unsafe { mem::zeroed() },
+            remaining2: 0,
+            coeff0: unsafe { mem::zeroed() },
+            coeff1: unsafe { mem::zeroed() },
         }
     }
 
@@ -884,6 +943,8 @@ impl Celt {
 
             println!("fine_bits end {}", self.fine_bits[i]);
         }
+
+        self.codedband = codedband;
     }
 
     fn decode_fine_energy(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
@@ -902,21 +963,193 @@ impl Celt {
         }
     }
 
-    /*
+    fn decode_band<'a>(&mut self, rd: &mut RangeDecoder, band: usize,
+                   mid_buf: &mut [f32], side_buf: Option<&mut [f32]>,
+                   n: usize, mut b: usize, mut blocks: usize,
+                   mut lowband: Option<&'a[f32]>, lm: usize,
+                   lowband_out: Option<&mut [f32]>, level: usize, gain: f32,
+                   lowband_scratch: &'a mut [f32], mut fill: usize) -> bool {
+
+        let mut n_b = n / blocks;
+        let mut n_b0 = n_b;
+        let dualstereo = side_buf.is_some();
+        let mut split = dualstereo;
+        let mut b0 = blocks;
+
+        let mut time_divide = 0;
+
+
+        if n == 1 {
+            let mut one_sample = move || {
+                let sign = if self.remaining2 >= 1 << 3 {
+                    self.remaining2 -= 1 << 3;
+                    b -= 1 << 3;
+                    rd.rawbits(1)
+                } else {
+                    0
+                };
+            };
+
+            one_sample();
+            if dualstereo {
+                one_sample();
+            }
+
+            if let Some(out) = lowband_out {
+                out[0] = mid_buf[0];
+            }
+
+            return true;
+        }
+
+        let recombine = if !dualstereo && level == 0 {
+            let mut tf_change = self.tf_change[band];
+            let recombine = if tf_change > 0 { tf_change } else { 0 };
+
+            let mut lowband_edit = if let Some(lowband_in) = lowband {
+                if b0 > 1 || (recombine != 0 || (n_b & 1) == 0 && tf_change < 0) {
+                    lowband_scratch[..n].copy_from_slice(&lowband_in[..n]);
+                    Some(lowband_scratch)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            for k in 0 .. recombine {
+                lowband_edit = if let Some(mut lowband_in) = lowband_edit {
+                    haar1(lowband_in, n >> k, 1 << k);
+                    Some(lowband_in)
+                } else {
+                    None
+                };
+
+                fill = BIT_INTERLEAVE[fill & 0xf] as usize | (BIT_INTERLEAVE[fill >> 4] as usize) << 2;
+            }
+
+            blocks >>= recombine;
+            n_b <<= recombine;
+
+            while (n_b & 1) == 0 && tf_change < 0 {
+                lowband_edit = if let Some(mut lowband_in) = lowband_edit {
+                    haar1(lowband_in, n_b, blocks);
+                    Some(lowband_in)
+                } else {
+                    None
+                };
+
+                fill |= fill << blocks;
+                blocks <<= 1;
+                n_b >>= 1;
+
+                time_divide += 1;
+                tf_change += 1;
+            }
+
+            if let Some(lowband_in) = lowband_edit {
+                lowband = Some(&*lowband_in);
+            }
+
+            b0 = blocks;
+            n_b0 = n_b;
+
+/*
+            if b0 > 1 && lowband.is_some() {
+                self.deinterleave_hadamard
+            }
+*/
+            recombine
+        } else {
+            0
+        };
+
+
+        return false;
+    }
+
     fn decode_bands(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
         // TODO: doublecheck it is really needed.
-        self.coeffs.iter_mut().for_each(|v| v.iter_mut().for_each(|val| *val = 0));
+        self.coeff0.iter_mut().for_each(|val| *val = 0f32);
+        self.coeff1.iter_mut().for_each(|val| *val = 0f32);
+
+        let mut update_lowband = true;
+        let mut lowband_offset = 0;
+
+        const NORM_SIZE: usize = 8 * 100;
+        let mut norm = [0f32; 2 * NORM_SIZE];
 
         for i in band.clone() {
-            let band_offset = (FREQ_BANDS[i] as i32) << self.lm;
+            let band_offset = (FREQ_BANDS[i] as usize) << self.lm;
             let band_size = (FREQ_RANGE[i] as i32) << self.lm;
 
-            let x = &mut self.coeffs[0][band_offset];
-            let y = &mut self.
+            let x = &mut self.coeff0[band_offset];
+            let y = &mut self.coeff1[band_offset];
 
+            let consumed = rd.tell_frac() as i32;
+
+
+            if i != band.start {
+                self.remaining -= consumed;
+            }
+
+            self.remaining2 = (rd.available_frac() - 1 - self.anticollapse_bit) as i32;
+
+            let b = if i <= self.codedband - 1 {
+                let remaining = self.remaining / ((self.codedband - 1).min(3) as i32);
+                (self.remaining2 + 1).min(self.pulses[i] + remaining).max(0).min(16383)
+            } else {
+                0
+            };
+
+            println!("b {}", b);
+
+            if FREQ_BANDS[i] as i32 - FREQ_RANGE[i] as i32 >= FREQ_BANDS[band.start] as i32 &&
+                (update_lowband || lowband_offset == 0) {
+                lowband_offset = i;
+            }
+
+            let mut cm = [0, 0];
+
+            if lowband_offset != 0 &&
+                (self.spread != SPREAD_AGGRESSIVE ||
+                 self.blocks > 1 ||
+                 self.tf_change[i] < 0) {
+                let effective_lowband = FREQ_BANDS[band.start].max(FREQ_BANDS[lowband_offset] - FREQ_RANGE[i]);
+                let foldstart = FREQ_BANDS[..lowband_offset].iter().rposition(|&v| {
+                    v <= effective_lowband
+                }).unwrap();
+                let foldend = FREQ_BANDS[lowband_offset..].iter().position(|&v| {
+                    v >= effective_lowband + FREQ_RANGE[i]
+                }).unwrap();
+                println!("fold {} {}", foldstart, foldend);
+
+                for j in foldstart..foldend {
+                    cm[0] |= self.frames[0].collapse_masks[j] as usize;
+                    cm[1] |= self.frames[self.stereo_pkt as usize].collapse_masks[j] as usize;
+                }
+            } else {
+                cm[0] = (1usize << self.blocks) - 1;
+                cm[1] = cm[0];
+            }
+
+            println!("cm {} {}", cm[0], cm[1]);
+
+            if self.dual_stereo && i == self.intensity_stereo {
+                self.dual_stereo = false;
+                for j in (FREQ_BANDS[band.start] << self.lm) as usize .. band_offset as usize {
+                    norm[j] = (norm[j] + norm[j + NORM_SIZE]) / 2.0;
+                }
+            }
+/*
+            if self.dual_stereo {
+                cm[0] = self.decode_band(rd, x, band_size, b / 2, self
+
+            }
+*/
         }
     }
-*/
+
     pub fn decode(
         &mut self,
         rd: &mut RangeDecoder,
@@ -977,7 +1210,7 @@ impl Celt {
         self.decode_tf_changes(rd, band.clone(), transient);
         self.decode_allocation(rd, band.clone());
         self.decode_fine_energy(rd, band.clone());
-        // self.decode_bands(rd, band.clone());
+        self.decode_bands(rd, band.clone());
     }
 }
 
@@ -988,8 +1221,8 @@ mod test {
 
         let n0 = n0 / 2;
 
-        for i in 0 .. stride {
-            for j in 0 .. n0 {
+        for i in 0..stride {
+            for j in 0..n0 {
                 let x0 = buf[stride * (2 * j) + i];
                 let x1 = buf[stride * (2 * j + 1) + i];
                 buf[stride * (2 * j) + i] = (x0 + x1) * FRAC_1_SQRT_2;
@@ -1001,7 +1234,10 @@ mod test {
     #[test]
     fn haar1_32_1() {
         let mut a = [
-           -1.414214, -1.414214, -1.414214, 0.000000, -1.414214, 0.000000, 0.000000, 0.000000, -1.414214, 1.414214, 1.414214, 0.000000, 1.414214, 0.000000, 0.000000, 0.000000, -0.017331, -1.403810, -0.089228, -0.005500, -1.511374, -0.243906, 1.517055, -0.095944, 1.476075, 0.257181, -0.201957, 1.363608, -0.037285, 1.601090, 0.258849, -1.609220,
+            -1.414214, -1.414214, -1.414214, 0.000000, -1.414214, 0.000000, 0.000000, 0.000000,
+            -1.414214, 1.414214, 1.414214, 0.000000, 1.414214, 0.000000, 0.000000, 0.000000,
+            -0.017331, -1.403810, -0.089228, -0.005500, -1.511374, -0.243906, 1.517055, -0.095944,
+            1.476075, 0.257181, -0.201957, 1.363608, -0.037285, 1.601090, 0.258849, -1.609220,
         ];
         let mut b = a.clone();
 
