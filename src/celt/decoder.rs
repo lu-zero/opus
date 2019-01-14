@@ -718,6 +718,42 @@ fn unquantize(rd: &mut RangeDecoder, x: &mut [f32], n: usize, k: usize, spread: 
     return extract_collapse_mask(&y[..n], blocks);
 }
 
+fn renormalize_vector(x: &mut [f32], gain: f32) {
+
+    let g: f32 = x.iter().map(|&v| v * v).sum();
+
+    let gain = gain / g.sqrt();
+
+    x.iter_mut().for_each(|v| *v *= gain);
+}
+
+fn stereo_merge(x: &mut [f32], y: &mut [f32], mid: f32, n: usize) {
+    let (xp, side) = x[..n].iter().zip(y[..n].iter()).fold((0f32, 0f32), |(xp, side), (&xv, &yv)| {
+        (xp + xv * yv, side + yv * yv)
+    });
+
+    let xp = xp * mid;
+
+    let e = mid * mid + side;
+
+    let e0 = e - 2 * xp;
+    let e1 = e + 2 * xp;
+
+    if e0 < 6e-4f32 || e1 < 6e-4f32 {
+        &mut y[..n].copy_from_slice(&x[..n]);
+    }
+
+    let gain0 = 1f32 / e0.sqrt();
+    let gain1 = 1f32 / e1.sqrt();
+
+    for (xy, yv) in x[..n].iter_mut().zip(y[..n].iter_mut() {
+        let v0 = mid * *xv;
+        let v1 = *yv;
+
+        *xv = gain0 * (v0 - v1);
+        *yv = gain1 * (v0 + v1);
+    }
+}
 
 impl Celt {
     pub fn new(stereo: bool) -> Self {
