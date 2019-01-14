@@ -626,10 +626,10 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
     norm
 }
 
-/*
-fn decode_pulses(rd: &mut RangeDecoder, y: &mut [i32], n: usize, k: usize) {
+
+fn decode_pulses(rd: &mut RangeDecoder, y: &mut [i32], n: usize, k: usize) -> f32 {
     fn pvq_u(n: usize, k: usize) -> usize {
-        PVQ_U_ROW[n.min(k)][n.max(k)]
+        pvq_u_row(n.min(k))[n.max(k)] as usize
     }
     fn pvq_v(n: usize, k: usize) -> usize {
         pvq_u(n, k) + pvq_u(n, k + 1)
@@ -637,20 +637,87 @@ fn decode_pulses(rd: &mut RangeDecoder, y: &mut [i32], n: usize, k: usize) {
 
     let idx = rd.decode_uniform(pvq_v(n, k));
 
-    TBD
+    cwrsi(n as u32, k as u32, idx as u32, y) as f32
+}
+
+// TODO use windows_mut once it exists
+fn exp_rotation1(x: &mut [f32], len: usize, stride: usize, c: f32, s: f32) {
+    let end = len - stride;
+    for i in 0 .. end {
+        let x1 = x[i];
+        let x2 = x[i + stride];
+
+        x[i + stride] = c * x2 + s * x1;
+        x[i] = c * x1 - s * x2;
+    }
+
+    for i in (0 .. end - stride - 1).rev() {
+        let x1 = x[i];
+        let x2 = x[i + stride];
+        x[i + stride] = c * x2 + s * x1;
+        x[0] = c * x1 - s * x2;
+    }
+}
+
+fn exp_rotation(x: &mut [f32], len: usize, stride: usize, k: usize, spread: usize) {
+    if  2 * k >= len || spread == SPREAD_NONE {
+        return;
+    }
+
+    let gain = len as f32 / ((len + (20 - 5 * spread) * k) as f32);
+    let theta = std::f32::consts::PI * gain * gain / 4.0;
+
+    let c = theta.cos();
+    let s = theta.sin();
+
+    let mut stride2 = 0;
+    if len >= stride << 3 {
+        stride2 = 1;
+        // equivalent to rounded sqrt(len / stride)
+        while (stride2 * stride2 + stride2) * stride + (stride >> 2) < len {
+            stride2 += 1;
+        }
+    }
+
+    let l = len / stride;
+    for i in 0 .. stride {
+        if stride2 != 0 {
+            exp_rotation1(&mut x[i * len ..], len, stride2, s, c);
+        }
+        exp_rotation1(&mut x[i * len ..], len, 1, c, s);
+    }
+}
+
+fn extract_collapse_mask(y: &[i32], b: usize) -> u32 {
+    if b <= 1 {
+        return 1;
+    }
+
+    let mut collapse_mask = 0;
+    for block in y.chunks_exact(b) {
+        block.iter().enumerate().for_each(|(i, &v)| {
+            collapse_mask |= ((v != 0) as u32) << i;
+        });
+    }
+
+    return collapse_mask;
 }
 
 
-fn unquantize(rd: &mut RangeDecoder, x: &mut [f32], n: usize, k: usize, spread: usize, blocks: usize, gain: float) {
+fn unquantize(rd: &mut RangeDecoder, x: &mut [f32], n: usize, k: usize, spread: usize, blocks: usize, gain: f32) -> u32 {
     let mut y: [i32; 176] = unsafe { mem::uninitialized() };
 
-    let gain = gain / decode_pulses(rd, y, n, k);
+    let gain = gain / decode_pulses(rd, &mut y, n, k).sqrt();
 
-    out[..n].iter_mut().zip(in_buf[..n].iter()).for_each(|(o, &i)| {
-        *o = g * i;
+    x[..n].iter_mut().zip(y[..n].iter()).for_each(|(o, &i)| {
+        *o = gain * i as f32;
     });
+
+    exp_rotation(x, n, blocks, k, spread);
+
+    return extract_collapse_mask(&y[..n], blocks);
 }
-*/
+
 
 impl Celt {
     pub fn new(stereo: bool) -> Self {
@@ -1573,6 +1640,23 @@ impl Celt {
 
 #[cfg(test)]
 mod test {
+
+    #[test]
+    fn extract_collapse_mask() {
+        let y = [0, 0, 1, -1, 4, 8, -4, 4];
+
+        let r = super::extract_collapse_mask(&y[..8], 8);
+
+        assert_eq!(r, 252);
+
+
+        let y = [1, -2, 0, -2, 0, 2, 0, 0, 0, 1, 1, 0, 1, 1, -1, 0];
+
+        let r = super::extract_collapse_mask(&y[..16], 4);
+
+        assert_eq!(r, 15);
+    }
+
     // TODO make the test cover the function properly
     #[test]
     fn cwrsi() {
