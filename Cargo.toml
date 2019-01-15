@@ -20,3 +20,4 @@ pretty_env_logger = "0.2"
 [dev-dependencies]
 matroska = { version = "0.1.0", git = "https://github.com/rust-av/matroska" }
 interpolate_name = "0.1"
+pretty_assertions = "0.5.1"

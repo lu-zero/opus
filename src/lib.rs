@@ -5,6 +5,10 @@ extern crate av_codec as codec;
 extern crate av_bitstream as bitstream;
 
 #[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
+#[cfg(test)]
 extern crate matroska;
 
 #[cfg(test)]
