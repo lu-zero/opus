@@ -406,6 +406,8 @@ pub trait CeltOnly {
     fn rawbits(&mut self, len: usize) -> usize;
     fn decode_uniform(&mut self, len: usize) -> usize;
     fn decode_laplace(&mut self, symbol: usize, decay: isize) -> isize;
+    fn decode_step(&mut self, k0: usize) -> usize;
+    fn decode_triangular(&mut self, qn: usize) -> usize;
     fn to_end(&mut self);
 }
 
@@ -474,6 +476,54 @@ impl<'a> CeltOnly for RangeDecoder<'a> {
         self.update(scale, low, 32768.min(low + symbol), 32768);
 
         value
+    }
+
+    fn decode_step(&mut self, k0: usize) -> usize {
+        let k1 = (k0 + 1) * 3;
+        let total = k1 + k0;
+        let scale = self.range / total;
+        let symbol = self.value / scale + 1;
+        let symbol = total - symbol.min(total);
+
+        let k = if symbol < k1 {
+            symbol / 3
+        } else {
+            symbol - (k0 + 1) /2
+        };
+
+        if k <= k0 {
+            self.update(scale, 3 * (k + 0), 3 * (k + 1), total);
+        } else {
+            self.update(scale, 3 * (k + 1) + (k - 1 - k0), 3 * (k0 + 1) + (k - 0 - k0), total);
+        }
+
+        k
+    }
+
+    fn decode_triangular(&mut self, qn: usize) -> usize {
+        use integer_sqrt::IntegerSquareRoot;
+
+        let qn2 = qn >> 1;
+        let total = (qn2 + 1) * (qn2 + 1);
+        let scale = self.range / total;
+        let center = self.value / scale + 1;
+        let center = total - center.min(total);
+
+        let (k, low, symbol) = if center < total >> 1 {
+            let k = ((8 * center + 1).integer_sqrt() - 1) >> 1;
+            let low = k * (k + 1) >> 1;
+            let symbol = k + 1;
+            (k, low, symbol)
+        } else {
+            let k = (2 * (qn + 1) - (8 * (total - center - 1) + 1).integer_sqrt()) >> 1;
+            let low = total - ((qn + 1 - k) * (qn + 2 - k) >> 1);
+            let symbol = qn + 1 - k;
+            (k, low, symbol)
+        };
+
+        self.update(scale, low, low + symbol, total);
+
+        k
     }
 
     fn to_end(&mut self) {
