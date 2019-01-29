@@ -16,6 +16,7 @@ av-format = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
 num-complex = "0.2"
 log = "0.4"
 pretty_env_logger = "0.2"
+integer-sqrt = "0.1.2"
 
 [dev-dependencies]
 matroska = { version = "0.1.0", git = "https://github.com/rust-av/matroska" }

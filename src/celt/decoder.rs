@@ -4,6 +4,7 @@ use std::mem;
 use entropy::*;
 use maths::*;
 use packet::*;
+use super::bitexact;
 
 const SHORT_BLOCKSIZE: usize = 120;
 const OVERLAP: usize = SHORT_BLOCKSIZE;
@@ -1378,6 +1379,106 @@ impl Celt {
         }
     }
 
+    fn decode_band_1(&mut self, rd: &mut RangeDecoder,
+                     mid_buf: &mut [f32],
+                     side_buf: Option<&mut [f32]>,
+                     lowband_out: Option<&mut [f32]>)
+    {
+        let mut one_sample = move || {
+            let sign = if self.remaining2 >= 1 << 3 {
+                self.remaining2 -= 1 << 3;
+                rd.rawbits(1)
+            } else {
+                0
+            };
+
+            if sign != 0 { -1f32 } else { 1f32 }
+        };
+
+        mid_buf[0] = one_sample();
+        if let Some(mut side) = side_buf {
+            side[0] = one_sample();
+        }
+        if let Some(mut out) = lowband_out {
+            out[0] = mid_buf[0];
+        }
+    }
+/*
+    fn compute_theta(&self, rd: &mut RangeDecoder, band: usize, lm: usize, n: usize, b: usize, b0: usize,
+                     dualstereo: bool, fill: usize) {
+        const QTHETA_OFFSET: usize = 4;
+        const QTHETA_OFFSET_TWOPHASE: usize = 16;
+        const BITRES: usize = 2 << 3;
+
+        let pulse_cap = FREQ_RANGE[band] + lm * 8;
+        let offset = (pulse_cap >> 1) - if dualstereo && n == 2 {
+            QTHETA_OFFSET_TWOPHASE
+        } else {
+            QTHETA_OFFSET
+        };
+
+        let qn = if dualstereo && band >= self.intensity_stereo { 1 } else {
+            let n2 = if dualstereo && n == 2 {
+                2 * n - 2;
+            } else {
+                2 * n - 1;
+            };
+
+            let qb = (b - pulse_cap - (4 << 3))
+                .max((b + n2 * offset) / n2)
+                .max(8 << 3);
+
+            if qb < (1 << 3 >> 1) {
+                1
+            } else {
+                ((QN_EXP2[qb & 0x7] >> (14 - (qb >> 3))) + 1) >> 1 << 1
+            }
+        };
+
+        let tell_frac = rd.tell_frac();
+        let (itheta, inv) = if qn != 1 {
+            let itheta = if dualstereo && n > 2 {
+                rd.decode_step(qn / 2)
+            } else if dualstereo || b0 > 1 {
+                rd.decode_uniform(qn + 1)
+            } else {
+                rd.decode_triangular(qn)
+            };
+            (itheta * 16384 / qn, 0)
+        } else {
+            let inv = if b > BITRES && self.remaining2 > BITRES {
+                rd.decode_logp(2)
+            } else {
+                0
+            };
+            (0, inv)
+        };
+
+        let qalloc = rd.tell_frac() - tell_frac;
+
+        b -= qalloc;
+
+        let (imid, iside, fill, delta) = if itheta == 0 {
+            let imid = 32767;
+            let iside = 0;
+            let fill = fill & ((1 << blocks) - 1);
+            let delta = - 16384;
+            (imid, iside, fill, delta)
+        } else if itheta == 16384 {
+            let imid = 0;
+            let iside = 32767;
+            let fill = fill & (((1 << blocks) - 1) << blocks);
+            let delta = 16384;
+            (imid, iside, fill, delta)
+        } else {
+            let imid = bitexact::cos(itheta as i16);
+            let iside = bitexact::cos(16384 - itheta as i16);
+            let delta = bitexact::frac_mul16(((n - 1) << 7) as i16, bitexact::log2tan(iside, imid));
+            (imid, iside, fill, delta)
+        };
+    }
+
+*/
     fn decode_band<'a>(&mut self, rd: &mut RangeDecoder, band: usize,
                    mid_buf: &mut [f32], side_buf: Option<&mut [f32]>,
                    n: usize, mut b: i32, mut blocks: usize,
@@ -1396,24 +1497,7 @@ impl Celt {
 
 
         if n == 1 {
-            let mut one_sample = move || {
-                let sign = if self.remaining2 >= 1 << 3 {
-                    self.remaining2 -= 1 << 3;
-                    b -= 1 << 3;
-                    rd.rawbits(1)
-                } else {
-                    0
-                };
-            };
-
-            one_sample();
-            if dualstereo {
-                one_sample();
-            }
-
-            if let Some(out) = lowband_out {
-                out[0] = mid_buf[0];
-            }
+            self.decode_band_1(rd, mid_buf, side_buf, lowband_out);
 
             return 1;
         }
@@ -1486,9 +1570,19 @@ impl Celt {
         } else {
             0
         };
+/*
+        let cache = &CACHE_BITS[CACHE_INDEX[(lm + 1) * MAX_BANDS + band]..];
 
-
-
+        if !dualstereo && duration >= 0 && b > cache[cache[0]] + 12 && n > 2 {
+            n >>= 1;
+            let (x, y) = x.split_at_mut(n);
+            duration -= 1;
+            if blocks == 1 {
+                fill = (fill & 1) | (fill << 1);
+            }
+            blocks = (blocks + 1) >> 1;
+        }
+*/
 
 
         return 0;
