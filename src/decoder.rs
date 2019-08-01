@@ -26,7 +26,7 @@ impl Dec {
 }
 
 impl Descriptor for Des {
-    fn create(&self) -> Box<Decoder> {
+    fn create(&self) -> Box<dyn Decoder> {
         Box::new(Dec::new())
     }
 
@@ -188,7 +188,7 @@ impl Decoder for Dec {
         }
     }
 
-pub const OPUS_DESCR: &Descriptor = &Des {
+pub const OPUS_DESCR: &dyn Descriptor = &Des {
     descr: Descr {
         codec: "opus",
         name: "opus",
