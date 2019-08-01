@@ -246,16 +246,16 @@ impl<'a> Packet<'a> {
         }
 
         match config {
-            c @ 0 ... 11 => {
+            c @ 0 ..= 11 => {
                 p.mode = Mode::SILK;
                 match c {
-                    0 ... 3 => {
+                    0 ..= 3 => {
                         p.bandwidth = Bandwidth::Narrow;
                     },
-                    4 ... 7 => {
+                    4 ..= 7 => {
                         p.bandwidth = Bandwidth::Medium;
                     },
-                    8 ... 11 => {
+                    8 ..= 11 => {
                         p.bandwidth = Bandwidth::Wide;
                     },
                     _ => unreachable!(),
@@ -268,13 +268,13 @@ impl<'a> Packet<'a> {
                     _ => unreachable!(),
                 }
             },
-            c @ 12 ... 15 => {
+            c @ 12 ..= 15 => {
                 p.mode = Mode::HYBRID;
                 match c {
-                    12 ... 13 => {
+                    12 ..= 13 => {
                         p.bandwidth = Bandwidth::SuperWide;
                     },
-                    14 ... 15 => {
+                    14 ..= 15 => {
                         p.bandwidth = Bandwidth::Full;
                     },
                     _ => unreachable!(),
@@ -285,19 +285,19 @@ impl<'a> Packet<'a> {
                     _ => unreachable!()
                 }
             },
-            c @ 16 ... 31 => {
+            c @ 16 ..= 31 => {
                 p.mode = Mode::CELT;
                 match c {
-                    16 ... 19 => {
+                    16 ..= 19 => {
                         p.bandwidth = Bandwidth::Narrow;
                     },
-                    20 ... 23 => {
+                    20 ..= 23 => {
                         p.bandwidth = Bandwidth::Wide;
                     },
-                    24 ... 27 => {
+                    24 ..= 27 => {
                         p.bandwidth = Bandwidth::SuperWide;
                     }
-                    28 ... 31 => {
+                    28 ..= 31 => {
                         p.bandwidth = Bandwidth::Full;
                     },
                     _ => unreachable!(),
