@@ -81,8 +81,6 @@ pub struct Celt {
 
     remaining: i32,
     remaining2: i32,
-    coeff0: [f32; MAX_FRAME_SIZE],
-    coeff1: [f32; MAX_FRAME_SIZE],
     codedband: usize,
 
     scratch: [f32; 22 * 8],
@@ -524,7 +522,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
         println!("{} - {}", k0, k);
         let d = k0 - k;
 
-        let val = ((d as i32 + s) ^ s);
+        let val = (d as i32 + s) ^ s;
         *norm += (val * val) as u32;
         val as i32
     }
@@ -781,8 +779,6 @@ impl Celt {
             codedband: 0,
             remaining: 0,
             remaining2: 0,
-            coeff0: unsafe { mem::zeroed() },
-            coeff1: unsafe { mem::zeroed() },
             scratch: unsafe { mem::zeroed() },
         }
     }
@@ -1482,8 +1478,12 @@ impl Celt {
     fn decode_band<'a>(&mut self, rd: &mut RangeDecoder, band: usize,
                    mid_buf: &mut [f32], side_buf: Option<&mut [f32]>,
                    n: usize, mut b: i32, mut blocks: usize,
-                   mut lowband: Option<&'a[f32]>, lm: usize,
-                   lowband_out: Option<&mut [f32]>, level: usize, gain: f32,
+/*                   lowband_buf: &mut [f32], lowband_off: Option<usize>,
+                   lowband_out_off: Option<usize>, */
+                   mut lowband: Option<&'a [f32]>,
+                   lowband_out: Option<&'a mut [f32]>,
+                   lm: usize,
+                   level: usize, gain: f32,
                    lowband_scratch: &'a mut [f32], mut fill: usize) -> usize {
 
         let mut n_b = n / blocks;
@@ -1495,8 +1495,8 @@ impl Celt {
         let mut time_divide = 0;
         let longblocks = b0 == 1;
 
-
         if n == 1 {
+//            let lowband_out = lowband_out_off.map(|off| &mut lowband_buf[off..]);
             self.decode_band_1(rd, mid_buf, side_buf, lowband_out);
 
             return 1;
@@ -1506,16 +1506,14 @@ impl Celt {
             let mut tf_change = self.tf_change[band];
             let recombine = if tf_change > 0 { tf_change } else { 0 };
 
-            let mut lowband_edit = if let Some(lowband_in) = lowband {
+            let mut lowband_edit = lowband.map(|lowband_in| {
                 if b0 > 1 || (recombine != 0 || (n_b & 1) == 0 && tf_change < 0) {
                     lowband_scratch[..n].copy_from_slice(&lowband_in[..n]);
                     Some(lowband_scratch)
                 } else {
                     None
                 }
-            } else {
-                None
-            };
+            }).unwrap_or(None);
 
             for k in 0 .. recombine {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
@@ -1588,10 +1586,9 @@ impl Celt {
         return 0;
     }
 
-    fn decode_bands(&mut self, rd: &mut RangeDecoder, band: Range<usize>) {
-        // TODO: doublecheck it is really needed.
-        self.coeff0.iter_mut().for_each(|val| *val = 0f32);
-        self.coeff1.iter_mut().for_each(|val| *val = 0f32);
+    fn decode_bands(&mut self, rd: &mut RangeDecoder, band: Range<usize>,
+                    coeff0: &mut [f32], coeff1: &mut [f32]) {
+        let lm = self.lm;
 
         let mut update_lowband = true;
         let mut lowband_offset = 0;
@@ -1601,14 +1598,13 @@ impl Celt {
         let mut norm_side = [0f32; NORM_SIZE];
 
         for i in band.clone() {
-            let band_offset = (FREQ_BANDS[i] as usize) << self.lm;
-            let band_size = (FREQ_RANGE[i] as i32) << self.lm;
+            let band_offset = (FREQ_BANDS[i] as usize) << lm;
+            let band_size = (FREQ_RANGE[i] as usize) << lm;
 
-            let x = &mut self.coeff0[band_offset];
-            let y = &mut self.coeff1[band_offset];
+            let x = &mut coeff0[band_offset..];
+            let y = &mut coeff1[band_offset..];
 
             let consumed = rd.tell_frac() as i32;
-
 
             if i != band.start {
                 self.remaining -= consumed;
@@ -1661,48 +1657,51 @@ impl Celt {
 
             if self.dual_stereo && i == self.intensity_stereo {
                 self.dual_stereo = false;
-                for j in (FREQ_BANDS[band.start] << self.lm) as usize .. band_offset as usize {
+                for j in (FREQ_BANDS[band.start] << lm) as usize .. band_offset as usize {
                     norm_mid[j] = (norm_mid[j] + norm_side[j]) / 2.0;
                 }
             }
 
             let mut lowband_scratch: [f32; 8 * 22] = unsafe { mem::uninitialized() };
-/*
+
+            let lowband_off = effective_lowband.map(|e| (e << lm) as usize);
+            let lowband_out_off = if i == band.end { Some(band_offset) } else { None };
+
+            let (lowband_mid, lowband_mid_out) = norm_mid.split_at_mut(band_offset);
+            let n = self.blocks;
+
+            let lowband_mid = lowband_off.map(|off| &lowband_mid[off .. off + n]);
+            let lowband_mid_out = lowband_out_off.map(|_| lowband_mid_out);
+
             if self.dual_stereo {
-                let (norm_off_mid, norm_off_side) = if let Some(e) = effective_lowband {
-                    let offset = e << self.lm;
-                    (Some(&norm_mid[offset ..]),
-                     Some(&norm_side[offset]))
-                } else {
-                    (None, None)
-                };
+                let (lowband_side, lowband_side_out) = norm_side.split_at_mut(band_offset);
+
+                let lowband_side = lowband_off.map(|off| &lowband_side[off .. off + n]);
+                let lowband_side_out = lowband_out_off.map(|_| lowband_side_out);
+
 
                 cm[0] = self.decode_band(rd, i, x, None, band_size, b / 2, self.blocks,
-                                         norm_off_mid, self.lm, &norm_mid[band_offset..], 0, 1f32,
+                                         lowband_mid, lowband_mid_out,
+                                         lm, 0, 1f32,
                                          &mut lowband_scratch, cm[0]);
 
                 cm[1] = self.decode_band(rd, i, y, None, band_size, b / 2, self.blocks,
-                                         norm_off_side, self.lm, &norm_side[band_offset..], 0, 1f32,
+                                         lowband_side, lowband_side_out,
+                                         lm, 0, 1f32,
                                          &mut lowband_scratch, cm[1]);
             } else {
-                let norm_off = if let Some(e) = effective_lowband {
-                    let offset = e << self.lm;
-                    Some(&norm_mid[offset ..])
-                } else {
-                    None
-                };
-
                 cm[0] = self.decode_band(rd, i, x, Some(y), band_size, b / 2, self.blocks,
-                                         norm_off, self.lm, Some(&norm_mid[band_offset..]), 0, 1f32,
+                                         lowband_mid, lowband_mid_out,
+                                         lm, 0, 1f32,
                                          &mut lowband_scratch, cm[0] | cm[1]);
                 cm[1] = cm[0];
             }
-*/
+
             self.frames[0].collapse_masks[i] = cm[0] as u8;
             self.frames[self.stereo_pkt as usize].collapse_masks[i] = cm[1] as u8;
             self.remaining += self.pulses[i] + consumed;
 
-            update_lowband = b > band_size << 3;
+            update_lowband = b > ((band_size << 3) as i32);
         }
     }
 
@@ -1766,7 +1765,12 @@ impl Celt {
         self.decode_tf_changes(rd, band.clone(), transient);
         self.decode_allocation(rd, band.clone());
         self.decode_fine_energy(rd, band.clone());
-        self.decode_bands(rd, band.clone());
+
+        // TODO: Consider spinning out a Band struct
+        let mut coeff0 = [0f32; MAX_FRAME_SIZE];
+        let mut coeff1 = [0f32; MAX_FRAME_SIZE];
+
+        self.decode_bands(rd, band.clone(), &mut coeff0, &mut coeff1);
     }
 }
 
