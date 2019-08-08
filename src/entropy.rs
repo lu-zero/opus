@@ -264,7 +264,7 @@ mod test {
 pub struct RangeDecoder<'a> {
     bits: UnpaddedBitReadBE<'a>,
     revs: ReverseBitReadLE<'a>,
-    range: usize,
+    pub(crate) range: usize,
     value: usize,
     total: usize,
 

@@ -84,6 +84,7 @@ pub struct Celt {
     codedband: usize,
 
     scratch: [f32; 22 * 8],
+    seed: u32,
 }
 
 const POSTFILTER_TAPS: &[&[f32]] = &[
@@ -448,6 +449,47 @@ fn pvq_u_row(row_index: usize) -> &'static [u32] {
     &PVQ_U[PVQ_U_ROW[row_index]..]
 }
 
+
+const CACHE_BITS: &[u8] = &[
+    40, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 40, 15, 23, 28,
+    31, 34, 36, 38, 39, 41, 42, 43, 44, 45, 46, 47, 47, 49, 50,
+    51, 52, 53, 54, 55, 55, 57, 58, 59, 60, 61, 62, 63, 63, 65,
+    66, 67, 68, 69, 70, 71, 71, 40, 20, 33, 41, 48, 53, 57, 61,
+    64, 66, 69, 71, 73, 75, 76, 78, 80, 82, 85, 87, 89, 91, 92,
+    94, 96, 98, 101, 103, 105, 107, 108, 110, 112, 114, 117, 119, 121, 123,
+    124, 126, 128, 40, 23, 39, 51, 60, 67, 73, 79, 83, 87, 91, 94,
+    97, 100, 102, 105, 107, 111, 115, 118, 121, 124, 126, 129, 131, 135, 139,
+    142, 145, 148, 150, 153, 155, 159, 163, 166, 169, 172, 174, 177, 179, 35,
+    28, 49, 65, 78, 89, 99, 107, 114, 120, 126, 132, 136, 141, 145, 149,
+    153, 159, 165, 171, 176, 180, 185, 189, 192, 199, 205, 211, 216, 220, 225,
+    229, 232, 239, 245, 251, 21, 33, 58, 79, 97, 112, 125, 137, 148, 157,
+    166, 174, 182, 189, 195, 201, 207, 217, 227, 235, 243, 251, 17, 35, 63,
+    86, 106, 123, 139, 152, 165, 177, 187, 197, 206, 214, 222, 230, 237, 250,
+    25, 31, 55, 75, 91, 105, 117, 128, 138, 146, 154, 161, 168, 174, 180,
+    185, 190, 200, 208, 215, 222, 229, 235, 240, 245, 255, 16, 36, 65, 89,
+    110, 128, 144, 159, 173, 185, 196, 207, 217, 226, 234, 242, 250, 11, 41,
+    74, 103, 128, 151, 172, 191, 209, 225, 241, 255, 9, 43, 79, 110, 138,
+    163, 186, 207, 227, 246, 12, 39, 71, 99, 123, 144, 164, 182, 198, 214,
+    228, 241, 253, 9, 44, 81, 113, 142, 168, 192, 214, 235, 255, 7, 49,
+    90, 127, 160, 191, 220, 247, 6, 51, 95, 134, 170, 203, 234, 7, 47,
+    87, 123, 155, 184, 212, 237, 6, 52, 97, 137, 174, 208, 240, 5, 57,
+    106, 151, 192, 231, 5, 59, 111, 158, 202, 243, 5, 55, 103, 147, 187,
+    224, 5, 60, 113, 161, 206, 248, 4, 65, 122, 175, 224, 4, 67, 127,
+    182, 234,
+];
+
+const CACHE_INDEX: &[i16] = &[
+    -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 41, 41, 41,
+    82, 82, 123, 164, 200, 222, 0, 0, 0, 0, 0, 0, 0, 0, 41,
+    41, 41, 41, 123, 123, 123, 164, 164, 240, 266, 283, 295, 41, 41, 41,
+    41, 41, 41, 41, 41, 123, 123, 123, 123, 240, 240, 240, 266, 266, 305,
+    318, 328, 336, 123, 123, 123, 123, 123, 123, 123, 123, 240, 240, 240, 240,
+    305, 305, 305, 318, 318, 343, 351, 358, 364, 240, 240, 240, 240, 240, 240,
+    240, 240, 305, 305, 305, 305, 343, 343, 343, 351, 351, 370, 376, 382, 387,
+];
+
 fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
     use std::f32::consts::FRAC_1_SQRT_2;
 
@@ -507,6 +549,10 @@ fn deinterleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride
                 scratch[i * n0 + j] = buf[j * stride + i];
             }
         }
+    }
+
+    for v in &buf[..size] {
+        println!("  {:.10e}", v);
     }
 
     buf[..size].copy_from_slice(&scratch[..size]);
@@ -687,7 +733,7 @@ fn exp_rotation(x: &mut [f32], len: usize, stride: usize, k: usize, spread: usiz
     }
 }
 
-fn extract_collapse_mask(y: &[i32], b: usize) -> u32 {
+fn extract_collapse_mask(y: &[i32], b: usize) -> usize {
     if b <= 1 {
         return 1;
     }
@@ -695,15 +741,38 @@ fn extract_collapse_mask(y: &[i32], b: usize) -> u32 {
     let mut collapse_mask = 0;
     for block in y.chunks_exact(b) {
         block.iter().enumerate().for_each(|(i, &v)| {
-            collapse_mask |= ((v != 0) as u32) << i;
+            collapse_mask |= ((v != 0) as usize) << i;
         });
     }
 
     return collapse_mask;
 }
 
+fn bits2pulses(cache: &[u8], bits: i32) -> i32 {
+    let mut low = 0;
+    let mut high = cache[0] as usize;
 
-fn unquantize(rd: &mut RangeDecoder, x: &mut [f32], n: usize, k: usize, spread: usize, blocks: usize, gain: f32) -> u32 {
+    for i in 0..6 {
+        let center = (low + high + 1) >> 1;
+        if cache[center] as i32 >= bits {
+            high = center;
+        } else {
+            low = center;
+        }
+    }
+
+    let low_bits = bits - if low == 0 { -1 } else { cache[low] as i32 };
+    let high_bits = cache[high] as i32 - bits;
+
+    let pulses = if low_bits <= high_bits { low } else { high };
+    pulses as i32
+}
+
+fn pulses2bits(cache: &[u8], pulses: i32) -> i32 {
+    if pulses == 0 { 0 } else { cache[pulses as usize] as i32 }
+}
+
+fn unquantize(rd: &mut RangeDecoder, x: &mut [f32], n: usize, k: usize, spread: usize, blocks: usize, gain: f32) -> usize {
     let mut y: [i32; 176] = unsafe { mem::uninitialized() };
 
     let gain = gain / decode_pulses(rd, &mut y, n, k).sqrt();
@@ -780,6 +849,7 @@ impl Celt {
             remaining: 0,
             remaining2: 0,
             scratch: unsafe { mem::zeroed() },
+            seed: 0,
         }
     }
 
@@ -1475,25 +1545,80 @@ impl Celt {
     }
 
 */
+
+    fn rng(&mut self) -> u32 {
+        self.seed = 1664525 * self.seed + 1013904223;
+
+        self.seed
+    }
+
+    fn decode_band_no_split(&mut self, rd: &mut RangeDecoder,
+                            mid_buf: &mut [f32], lowband: Option<&[f32]>,
+                            n: usize, blocks: usize, gain: f32,
+                            cache: &[u8], b: i32, fill: usize) -> usize {
+        let mut q = bits2pulses(cache, b);
+        let mut curr_bits = pulses2bits(cache, q);
+
+        self.remaining2 -= curr_bits;
+
+        // TODO: simplify
+        while self.remaining2 < 0 && q > 0 {
+            self.remaining2 += curr_bits;
+            q -= 1;
+            curr_bits = pulses2bits(cache, q);
+            self.remaining2 -= curr_bits;
+        }
+
+        let cm = if q != 0 {
+            let k = if q < 8 { q } else { (8 + (q & 7)) << ((q >> 3) - 1) };
+            unquantize(rd, mid_buf, n, k as usize, self.spread, blocks, gain)
+        } else {
+            let cm_mask = (1usize << blocks) - 1;
+            let fill = fill & cm_mask;
+            if fill == 0 {
+                for v in mid_buf[..n].iter_mut() {
+                    *v = 0f32;
+                }
+                0
+            } else {
+                let cm = if let Some(lowband) = lowband {
+                    for (v, &l) in mid_buf[..n].iter_mut().zip(lowband[..n].iter()) {
+                        let rng = if (self.rng() & 0x8000 ) != 0 { 1f32 / 256f32 } else { -1f32 / 256f32 };
+                        *v = l + rng;
+                    }
+                    fill
+                } else {
+                    for v in mid_buf[..n].iter_mut() {
+                        *v = (self.rng() as i32 >> 20) as f32;
+                    }
+                    cm_mask
+                };
+                renormalize_vector(&mut mid_buf[..n], gain);
+                cm
+            }
+        };
+        cm
+    }
+
     fn decode_band<'a>(&mut self, rd: &mut RangeDecoder, band: usize,
-                   mid_buf: &mut [f32], side_buf: Option<&mut [f32]>,
-                   n: usize, mut b: i32, mut blocks: usize,
+                   mut mid_buf: &'a mut [f32], mut side_buf: Option<&'a mut [f32]>,
+                   mut n: usize, mut b: i32, mut blocks: usize,
 /*                   lowband_buf: &mut [f32], lowband_off: Option<usize>,
                    lowband_out_off: Option<usize>, */
                    mut lowband: Option<&'a [f32]>,
                    lowband_out: Option<&'a mut [f32]>,
-                   lm: usize,
+                   mut lm: isize,
                    level: usize, gain: f32,
                    lowband_scratch: &'a mut [f32], mut fill: usize) -> usize {
 
         let mut n_b = n / blocks;
         let mut n_b0 = n_b;
         let dualstereo = side_buf.is_some();
-        let mut split = dualstereo;
         let mut b0 = blocks;
 
         let mut time_divide = 0;
         let longblocks = b0 == 1;
+        println!("decode_band N={}", n);
 
         if n == 1 {
 //            let lowband_out = lowband_out_off.map(|off| &mut lowband_buf[off..]);
@@ -1507,13 +1632,15 @@ impl Celt {
             let recombine = if tf_change > 0 { tf_change } else { 0 };
 
             let mut lowband_edit = lowband.map(|lowband_in| {
-                if b0 > 1 || (recombine != 0 || (n_b & 1) == 0 && tf_change < 0) {
+                if b0 > 1 || (recombine != 0 || ((n_b & 1) == 0 && tf_change < 0)) {
                     lowband_scratch[..n].copy_from_slice(&lowband_in[..n]);
                     Some(lowband_scratch)
                 } else {
                     None
                 }
             }).unwrap_or(None);
+
+            println!("recombine {}", recombine);
 
             for k in 0 .. recombine {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
@@ -1528,7 +1655,7 @@ impl Celt {
 
             blocks >>= recombine;
             n_b <<= recombine;
-
+            println!("blocks {} N_B {}", blocks, n_b);
             while (n_b & 1) == 0 && tf_change < 0 {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
                     haar1(lowband_in, n_b, blocks);
@@ -1548,7 +1675,7 @@ impl Celt {
             b0 = blocks;
             n_b0 = n_b;
 
-
+            println!("B0 {}", b0);
             if b0 > 1 {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
                     deinterleave_hadamard(&mut self.scratch, lowband_in,
@@ -1568,22 +1695,34 @@ impl Celt {
         } else {
             0
         };
-/*
-        let cache = &CACHE_BITS[CACHE_INDEX[(lm + 1) * MAX_BANDS + band]..];
 
-        if !dualstereo && duration >= 0 && b > cache[cache[0]] + 12 && n > 2 {
+        let cache = &CACHE_BITS[CACHE_INDEX[(lm + 1) as usize * MAX_BANDS + band] as usize ..];
+
+        let split = if !dualstereo && lm >= 0 && b > (cache[cache[0] as usize] as i32) + 12 && n > 2 {
             n >>= 1;
-            let (x, y) = x.split_at_mut(n);
-            duration -= 1;
+            let (split_mid, split_side) = mid_buf.split_at_mut(n);
+
+            mid_buf = split_mid;
+            side_buf = Some(split_side);
+
+            lm -= 1;
             if blocks == 1 {
                 fill = (fill & 1) | (fill << 1);
             }
             blocks = (blocks + 1) >> 1;
-        }
-*/
+            true
+        } else { dualstereo };
+
+        println!("split {} blocks {} lm {}", split as u8, blocks, lm);
+
+        let cm = if split {
+            0
+        } else {
+            self.decode_band_no_split(rd, mid_buf, lowband, n, blocks, gain, cache, b, fill)
+        };
 
 
-        return 0;
+        cm
     }
 
     fn decode_bands(&mut self, rd: &mut RangeDecoder, band: Range<usize>,
@@ -1682,17 +1821,17 @@ impl Celt {
 
                 cm[0] = self.decode_band(rd, i, x, None, band_size, b / 2, self.blocks,
                                          lowband_mid, lowband_mid_out,
-                                         lm, 0, 1f32,
+                                         lm as isize, 0, 1f32,
                                          &mut lowband_scratch, cm[0]);
 
                 cm[1] = self.decode_band(rd, i, y, None, band_size, b / 2, self.blocks,
                                          lowband_side, lowband_side_out,
-                                         lm, 0, 1f32,
+                                         lm as isize, 0, 1f32,
                                          &mut lowband_scratch, cm[1]);
             } else {
                 cm[0] = self.decode_band(rd, i, x, Some(y), band_size, b / 2, self.blocks,
                                          lowband_mid, lowband_mid_out,
-                                         lm, 0, 1f32,
+                                         lm as isize, 0, 1f32,
                                          &mut lowband_scratch, cm[0] | cm[1]);
                 cm[1] = cm[0];
             }
@@ -1771,6 +1910,8 @@ impl Celt {
         let mut coeff1 = [0f32; MAX_FRAME_SIZE];
 
         self.decode_bands(rd, band.clone(), &mut coeff0, &mut coeff1);
+
+        self.seed = rd.range as u32;
     }
 }
 
