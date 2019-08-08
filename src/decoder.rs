@@ -202,7 +202,6 @@ mod test {
     use super::*;
     use matroska::demuxer::*;
     use format::demuxer::Context;
-    use format::demuxer::Demuxer;
     use format::demuxer::Event;
     use format::buffer::*;
     use std::fs::File;
