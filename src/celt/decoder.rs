@@ -490,6 +490,16 @@ const CACHE_INDEX: &[i16] = &[
     240, 240, 305, 305, 305, 305, 343, 343, 343, 351, 351, 370, 376, 382, 387,
 ];
 
+const QN_EXP2: &[u16] = &[
+    16384, 17866, 19483, 21247, 23170, 25267, 27554, 30048,
+];
+
+const BIT_DEINTERLEAVE: &[u8] = &[
+    0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F,
+    0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF
+];
+
+
 fn haar1(buf: &mut [f32], n0: usize, stride: usize) {
     use std::f32::consts::FRAC_1_SQRT_2;
 
@@ -668,6 +678,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
         *yy = update(k, 0, s, &mut norm);
     }
 
+    println!("norm {}", norm);
     norm
 }
 
@@ -823,6 +834,16 @@ fn stereo_merge(x: &mut [f32], y: &mut [f32], mid: f32, n: usize) {
         *xv = gain0 * (v0 - v1);
         *yv = gain1 * (v0 + v1);
     }
+}
+
+struct BandInfo {
+    itheta: usize,
+    inv: bool,
+    mid: f32,
+    side: f32,
+    delta: i16,
+    qalloc: usize,
+    fill: usize,
 }
 
 impl Celt {
@@ -1469,14 +1490,15 @@ impl Celt {
             out[0] = mid_buf[0];
         }
     }
-/*
-    fn compute_theta(&self, rd: &mut RangeDecoder, band: usize, lm: usize, n: usize, b: usize, b0: usize,
-                     dualstereo: bool, fill: usize) {
+
+    fn compute_theta(&self, rd: &mut RangeDecoder,
+                     band: usize, lm: usize, n: usize, b: usize, b0: usize, blocks: usize,
+                     dualstereo: bool, fill: usize) -> BandInfo {
         const QTHETA_OFFSET: usize = 4;
         const QTHETA_OFFSET_TWOPHASE: usize = 16;
-        const BITRES: usize = 2 << 3;
+        const BITRES: i32 = 2 << 3;
 
-        let pulse_cap = FREQ_RANGE[band] + lm * 8;
+        let pulse_cap = FREQ_RANGE[band] as usize + lm * 8;
         let offset = (pulse_cap >> 1) - if dualstereo && n == 2 {
             QTHETA_OFFSET_TWOPHASE
         } else {
@@ -1485,19 +1507,19 @@ impl Celt {
 
         let qn = if dualstereo && band >= self.intensity_stereo { 1 } else {
             let n2 = if dualstereo && n == 2 {
-                2 * n - 2;
+                2 * n - 2
             } else {
-                2 * n - 1;
+                2 * n - 1
             };
 
             let qb = (b - pulse_cap - (4 << 3))
-                .max((b + n2 * offset) / n2)
-                .max(8 << 3);
+                .min((b + n2 * offset) / n2)
+                .min(8 << 3);
 
             if qb < (1 << 3 >> 1) {
                 1
             } else {
-                ((QN_EXP2[qb & 0x7] >> (14 - (qb >> 3))) + 1) >> 1 << 1
+                ((QN_EXP2[qb & 0x7] as usize >> (14 - (qb >> 3))) + 1) >> 1 << 1
             }
         };
 
@@ -1510,19 +1532,17 @@ impl Celt {
             } else {
                 rd.decode_triangular(qn)
             };
-            (itheta * 16384 / qn, 0)
+            (itheta * 16384 / qn, false)
         } else {
-            let inv = if b > BITRES && self.remaining2 > BITRES {
+            let inv = if dualstereo && b as i32 > BITRES && self.remaining2 > BITRES {
                 rd.decode_logp(2)
             } else {
-                0
+                false
             };
             (0, inv)
         };
 
         let qalloc = rd.tell_frac() - tell_frac;
-
-        b -= qalloc;
 
         let (imid, iside, fill, delta) = if itheta == 0 {
             let imid = 32767;
@@ -1537,14 +1557,22 @@ impl Celt {
             let delta = 16384;
             (imid, iside, fill, delta)
         } else {
-            let imid = bitexact::cos(itheta as i16);
-            let iside = bitexact::cos(16384 - itheta as i16);
-            let delta = bitexact::frac_mul16(((n - 1) << 7) as i16, bitexact::log2tan(iside, imid));
+            let imid = bitexact::cos(itheta as i16) as i32;
+            let iside = bitexact::cos(16384 - itheta as i16) as i32;
+            let delta = bitexact::frac_mul16(((n - 1) << 7) as i16, bitexact::log2tan(iside, imid) as i16);
             (imid, iside, fill, delta)
         };
-    }
 
-*/
+        BandInfo {
+            itheta,
+            inv,
+            fill,
+            delta,
+            qalloc,
+            mid: imid as f32 / 32768.0,
+            side: iside as f32 / 32768.0,
+        }
+    }
 
     fn rng(&mut self) -> u32 {
         self.seed = 1664525 * self.seed + 1013904223;
@@ -1614,11 +1642,12 @@ impl Celt {
         let mut n_b = n / blocks;
         let mut n_b0 = n_b;
         let dualstereo = side_buf.is_some();
+        let mut n0 = n;
         let mut b0 = blocks;
 
         let mut time_divide = 0;
         let longblocks = b0 == 1;
-        println!("decode_band N={}", n);
+        println!("decode_band N={} lowband_out {}", n, lowband_out.is_some() as u8);
 
         if n == 1 {
 //            let lowband_out = lowband_out_off.map(|off| &mut lowband_buf[off..]);
@@ -1715,12 +1744,64 @@ impl Celt {
 
         println!("split {} blocks {} lm {}", split as u8, blocks, lm);
 
-        let cm = if split {
+        // TODO: move this code out
+        let mut cm = if split {
+            let info = self.compute_theta(rd, band, lm as usize, n, b as usize, b0, blocks, dualstereo, fill);
+            let BandInfo { itheta, inv, mid, side, delta, qalloc, fill, } = info;
+
+            b -= qalloc as i32;
+
+            println!("itheta {} delta {}", itheta, delta);
+
+            if let Some(side_buf) = side_buf { // same as dualstereo
+                if n != 2 {
+                    // stereo_merge
+                }
+                if inv {
+                    for v in side_buf[..n].iter_mut() {
+                        *v *= -1.0;
+                    }
+                }
+            }
+
             0
         } else {
             self.decode_band_no_split(rd, mid_buf, lowband, n, blocks, gain, cache, b, fill)
         };
 
+        if level == 0 {
+            if b0 > 1 {
+                interleave_hadamard(&mut self.scratch, mid_buf, n_b >> recombine, b0 << recombine, longblocks);
+            }
+
+            n_b = n_b0;
+            blocks = b0;
+            for _ in 0..time_divide {
+                blocks >>= 1;
+                n_b <<= 1;
+                cm |= cm >> blocks;
+                haar1(mid_buf, n_b, blocks);
+            }
+
+            for k in 0..recombine {
+                cm = BIT_DEINTERLEAVE[cm as usize] as usize;
+                haar1(mid_buf, n0 >> k, 1 << k);
+            }
+
+            blocks <<= recombine;
+
+            if let Some(lowband_out) = lowband_out {
+                let n  = (n0 as f32).sqrt();
+                println!("Lowband_out");
+                for (v, &m) in lowband_out[..n0].iter_mut().zip(mid_buf[..n0].iter()) {
+                    *v = n * m;
+                    println!("{:.08}", *v);
+                }
+            }
+
+            cm &= (1 << blocks) - 1;
+            println!("cm {}", cm);
+        }
 
         cm
     }
@@ -1804,7 +1885,7 @@ impl Celt {
             let mut lowband_scratch: [f32; 8 * 22] = unsafe { mem::uninitialized() };
 
             let lowband_off = effective_lowband.map(|e| (e << lm) as usize);
-            let lowband_out_off = if i == band.end { Some(band_offset) } else { None };
+            let lowband_out_off = if i != band.end { Some(band_offset) } else { None };
 
             let (lowband_mid, lowband_mid_out) = norm_mid.split_at_mut(band_offset);
             let n = self.blocks;
