@@ -392,6 +392,11 @@ impl<'a> RangeDecoder<'a> {
     }
 
     #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.size_in_bits
+    }
+
+    #[inline(always)]
     pub fn available(&self) -> usize {
         self.size_in_bits - self.tell()
     }
@@ -415,6 +420,7 @@ const UNI_BITS: usize = 8;
 
 impl<'a> CeltOnly for RangeDecoder<'a> {
     fn rawbits(&mut self, len: usize) -> usize {
+        self.total += len;
         self.revs.get_bits_32(len) as usize
     }
 
