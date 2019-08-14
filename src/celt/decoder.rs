@@ -585,6 +585,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
 
     while n > 2 {
         let mut yy = y.next().unwrap();
+        println!("k {} n {} i {}", k, n, i);
         if k >= n {
             let row = pvq_u_row(n as usize);
             let p = row[k as usize + 1] as u32;
@@ -621,17 +622,18 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
             }
 
             i -= p;
+            println!("-- i {} p {}", i, p);
             *yy = update(k0, k, s, &mut norm);
         } else {
             let mut p = pvq_u_row(k as usize)[n as usize] as u32;
             let q = pvq_u_row(k as usize + 1)[n as usize] as u32;
-
+            println!("p {} q {}", p, q);
             if i > p && i < q {
                 i -= p;
                 *yy = 0;
             } else {
-                let s = if i >= p {
-                    i -= p;
+                let s = if i >= q {
+                    i -= q;
                     -1
                 } else {
                     0
@@ -647,6 +649,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
                 }
 
                 i -= p;
+                println!("i {} p {}", i, p);
                 *yy = update(k0, k, s, &mut norm);
             }
         }
@@ -654,6 +657,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
     }
     { // n == 2
         let p = 2 * k + 1;
+        println!("p {} i {}", p, i);
         let s = if i >= p {
             i -= p;
             -1
@@ -668,6 +672,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
         }
 
         let yy = y.next().unwrap();
+        println!("n == 2");
         *yy = update(k0, k, s, &mut norm);
     }
 
@@ -675,6 +680,7 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
         let s = -(i as i32);
 
         let yy = y.next().unwrap();
+        println!("n == 1");
         *yy = update(k, 0, s, &mut norm);
     }
 
@@ -692,7 +698,7 @@ fn decode_pulses(rd: &mut RangeDecoder, y: &mut [i32], n: usize, k: usize) -> f3
     }
 
     let idx = rd.decode_uniform(pvq_v(n, k));
-
+    println!("idx {}", idx);
     cwrsi(n as u32, k as u32, idx as u32, y) as f32
 }
 
@@ -1707,10 +1713,10 @@ impl Celt {
             println!("B0 {}", b0);
             if b0 > 1 {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
+                    println!("deinterleave");
                     deinterleave_hadamard(&mut self.scratch, lowband_in,
                                           n_b >> recombine, b0 << recombine, longblocks);
 
-                    panic!();
                     Some(lowband_in)
                 } else {
                     None
@@ -1752,6 +1758,7 @@ impl Celt {
             b -= qalloc as i32;
 
             println!("itheta {} delta {}", itheta, delta);
+            panic!();
 
             if let Some(side_buf) = side_buf { // same as dualstereo
                 if n != 2 {
@@ -1763,7 +1770,6 @@ impl Celt {
                     }
                 }
             }
-
             0
         } else {
             self.decode_band_no_split(rd, mid_buf, lowband, n, blocks, gain, cache, b, fill)
@@ -1833,6 +1839,7 @@ impl Celt {
             self.remaining2 = (rd.available_frac() - 1 - self.anticollapse_bit) as i32;
 
             let b = if i <= self.codedband - 1 {
+                println!("rem {} rem2 {}", self.remaining, self.remaining2);
                 let remaining = self.remaining / ((self.codedband - 1).min(3) as i32);
                 (self.remaining2 + 1).min(self.pulses[i] + remaining).max(0).min(16383)
             } else {
@@ -1852,12 +1859,26 @@ impl Celt {
                  self.blocks > 1 ||
                  self.tf_change[i] < 0) {
                 let effective_lowband = FREQ_BANDS[band.start].max(FREQ_BANDS[lowband_offset] - FREQ_RANGE[i]);
-                let foldstart = FREQ_BANDS[..lowband_offset].iter().rposition(|&v| {
-                    v <= effective_lowband
-                }).unwrap();
-                let foldend = FREQ_BANDS[lowband_offset..].iter().position(|&v| {
-                    v >= effective_lowband + FREQ_RANGE[i]
-                }).unwrap();
+                println!("effective_lowband {} off {} range {}", effective_lowband, lowband_offset, FREQ_RANGE[i]);
+                let mut foldstart = lowband_offset;
+
+                for (e, &v) in FREQ_BANDS[..lowband_offset].iter().enumerate().rev() {
+                    if v <= effective_lowband {
+                        // println!("start [{}] {}", e, v);
+                        foldstart = e;
+                        break;
+                    }
+                }
+
+                let mut foldend = lowband_offset;
+
+                for (e, &v) in FREQ_BANDS[lowband_offset..].iter().enumerate() {
+                    if v >= effective_lowband + FREQ_RANGE[i] {
+                        // println!("end [{}] {}", e, v);
+                        foldend += e;
+                        break;
+                    }
+                }
                 println!("fold {} {}", foldstart, foldend);
 
                 for j in foldstart..foldend {
@@ -1938,11 +1959,14 @@ impl Celt {
 
         self.lm = (frame_size / SHORT_BLOCKSIZE).ilog() - 1;
 
+        println!("framebits {} tell {}", rd.len(), rd.tell());
+
         let silence = if rd.available() > 0 {
             rd.decode_logp(15)
         } else {
             true
         };
+
 
         println!("silence {}", silence);
 
@@ -1982,13 +2006,24 @@ impl Celt {
             .for_each(|f| f.collapse_masks.iter_mut().for_each(|c| *c = 0));
 
         self.decode_coarse_energy(rd, band.clone());
+
+        println!("available {} tell {} frac {}", rd.available(), rd.tell(), rd.tell_frac());
+
         self.decode_tf_changes(rd, band.clone(), transient);
+
+        println!("available {} tell {} frac {}", rd.available(), rd.tell(), rd.tell_frac());
+
         self.decode_allocation(rd, band.clone());
+
+        println!("available {} tell {} frac {}", rd.available(), rd.tell(), rd.tell_frac());
+
         self.decode_fine_energy(rd, band.clone());
 
         // TODO: Consider spinning out a Band struct
         let mut coeff0 = [0f32; MAX_FRAME_SIZE];
         let mut coeff1 = [0f32; MAX_FRAME_SIZE];
+
+        println!("available {} tell {} frac {}", rd.available(), rd.tell(), rd.tell_frac());
 
         self.decode_bands(rd, band.clone(), &mut coeff0, &mut coeff1);
 
