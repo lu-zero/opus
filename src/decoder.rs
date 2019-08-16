@@ -245,6 +245,7 @@ mod test {
     #[interpolate_test(n11, 11)]
     #[interpolate_test(n12, 12)]
     fn send_packet(index: usize) {
+        better_panic::install();
         let p = env!("CARGO_MANIFEST_DIR");
         let mut d = PathBuf::from(p);
         d.push("assets");

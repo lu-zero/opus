@@ -539,12 +539,21 @@ fn interleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride: 
             }
         }
     }
+    println!("interleave");
+    for v in &buf[..size] {
+        println!("  {:#.10}", v);
+    }
 
     buf[..size].copy_from_slice(&scratch[..size]);
 }
 
 fn deinterleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride: usize, hadamard: bool) {
     let size = n0 * stride;
+
+    println!("before deinterleave");
+    for v in &buf[..size] {
+        println!("  {:#.10}", v);
+    }
 
     if hadamard {
         let shuffle = &HADAMARD_ORDERY[stride - 2..];
@@ -561,8 +570,9 @@ fn deinterleave_hadamard(scratch: &mut [f32], buf: &mut [f32], n0: usize, stride
         }
     }
 
-    for v in &buf[..size] {
-        println!("  {:.10e}", v);
+    println!("deinterleave");
+    for v in &scratch[..size] {
+        println!("  {:#.10}", v);
     }
 
     buf[..size].copy_from_slice(&scratch[..size]);
@@ -1655,6 +1665,11 @@ impl Celt {
         let longblocks = b0 == 1;
         println!("decode_band N={} lowband_out {}", n, lowband_out.is_some() as u8);
 
+        println!("mid_buf");
+        for v in mid_buf[..n].iter() {
+            println!("{:.08}", v);
+        }
+
         if n == 1 {
 //            let lowband_out = lowband_out_off.map(|off| &mut lowband_buf[off..]);
             self.decode_band_1(rd, mid_buf, side_buf, lowband_out);
@@ -1666,16 +1681,26 @@ impl Celt {
             let mut tf_change = self.tf_change[band];
             let recombine = if tf_change > 0 { tf_change } else { 0 };
 
-            let mut lowband_edit = lowband.map(|lowband_in| {
+            println!("recombine {}", recombine);
+
+            if let Some(ref lowband) = lowband {
+                println!("lowband");
+                for v in lowband.iter() {
+                    println!("{:.08}", v);
+                }
+            }
+
+            let mut lowband_edit = lowband.map(move |lowband_in| {
                 if b0 > 1 || (recombine != 0 || ((n_b & 1) == 0 && tf_change < 0)) {
+                    println!("copy");
                     lowband_scratch[..n].copy_from_slice(&lowband_in[..n]);
-                    Some(lowband_scratch)
+
+                    Some(&mut lowband_scratch[..n])
                 } else {
                     None
                 }
             }).unwrap_or(None);
 
-            println!("recombine {}", recombine);
 
             for k in 0 .. recombine {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
@@ -1693,6 +1718,7 @@ impl Celt {
             println!("blocks {} N_B {}", blocks, n_b);
             while (n_b & 1) == 0 && tf_change < 0 {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
+                    println!("EDIT");
                     haar1(lowband_in, n_b, blocks);
                     Some(lowband_in)
                 } else {
@@ -1713,7 +1739,6 @@ impl Celt {
             println!("B0 {}", b0);
             if b0 > 1 {
                 lowband_edit = if let Some(mut lowband_in) = lowband_edit {
-                    println!("deinterleave");
                     deinterleave_hadamard(&mut self.scratch, lowband_in,
                                           n_b >> recombine, b0 << recombine, longblocks);
 
@@ -1909,7 +1934,7 @@ impl Celt {
             let lowband_out_off = if i != band.end { Some(band_offset) } else { None };
 
             let (lowband_mid, lowband_mid_out) = norm_mid.split_at_mut(band_offset);
-            let n = self.blocks;
+            let n = band_size;
 
             let lowband_mid = lowband_off.map(|off| &lowband_mid[off .. off + n]);
             let lowband_mid_out = lowband_out_off.map(|_| lowband_mid_out);

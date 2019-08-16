@@ -10,7 +10,7 @@ pub fn mul16(a: i16, b: i16) -> i32 {
 
 #[inline(always)]
 pub fn frac_mul16(a: i16, b: i16) -> i16 {
-    let v = a * b;
+    let v = mul16(a, b);
 
     ((16384 + v as i32) >> 15) as i16
 }
