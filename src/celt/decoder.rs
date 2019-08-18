@@ -1513,8 +1513,8 @@ impl Celt {
         const QTHETA_OFFSET: usize = 4;
         const QTHETA_OFFSET_TWOPHASE: usize = 16;
         const BITRES: i32 = 2 << 3;
-
-        let pulse_cap = FREQ_RANGE[band] as usize + lm * 8;
+        println!("band {}", band);
+        let pulse_cap = LOG_FREQ_RANGE[band] as usize + lm * 8;
         let offset = (pulse_cap >> 1) - if dualstereo && n == 2 {
             QTHETA_OFFSET_TWOPHASE
         } else {
@@ -1527,7 +1527,7 @@ impl Celt {
             } else {
                 2 * n - 1
             };
-
+            println!("n2 {} pulse_cap {} b {}", n2, pulse_cap, b);
             let qb = (b - pulse_cap - (4 << 3))
                 .min((b + n2 * offset) / n2)
                 .min(8 << 3);
@@ -1538,6 +1538,8 @@ impl Celt {
                 ((QN_EXP2[qb & 0x7] as usize >> (14 - (qb >> 3))) + 1) >> 1 << 1
             }
         };
+
+        println!("qn {}", qn);
 
         let tell_frac = rd.tell_frac();
         let (itheta, inv) = if qn != 1 {
