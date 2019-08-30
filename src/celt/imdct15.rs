@@ -44,35 +44,41 @@ fn m_c(out: &mut [Complex32], inp: Complex32) {
 Once const fn and step_by are stabler reconsider the code
 */
 
+#[inline]
 fn mulc(a: Complex32, b: Complex32) -> (f32, f32, f32, f32) {
     (a.re * b.re, a.re * b.im, a.im * b.re, a.im * b.im)
 }
 
-fn m_c(out: &mut [Complex32], inp: Complex32) {
-    let (rr, ri, ir, ii) = mulc(inp, FACT[0]);
-    out[0] = Complex32::new(rr - ii, ir + ri);
-    out[3] = Complex32::new(rr + ii, ir - ri);
-    let (rr, ri, ir, ii) = mulc(inp, FACT[1]);
-    out[1] = Complex32::new(rr - ii, ir + ri);
-    out[2] = Complex32::new(rr + ii, ir - ri);
+#[inline]
+fn m_c(inp: Complex32) -> [Complex32; 4] {
+    let (rr0, ri0, ir0, ii0) = mulc(inp, FACT[0]);
+    let (rr1, ri1, ir1, ii1) = mulc(inp, FACT[1]);
+    [
+        Complex32::new(rr0 - ii0, ir0 + ri0),
+        Complex32::new(rr1 - ii1, ir1 + ri1),
+        Complex32::new(rr1 + ii1, ir1 - ri1),
+        Complex32::new(rr0 + ii0, ir0 - ri0),
+    ]
 }
 
 use std::mem;
 
-fn fft5(out: &mut [Complex32], inp: &[Complex32], stride: usize) {
-    let mut z: [[Complex32; 4]; 4] = unsafe { mem::uninitialized() };
+fn fft5(inp: &[Complex32], stride: usize) -> [Complex32; 5] {
+    let z = [
+        m_c(inp[1 * stride]),
+        m_c(inp[2 * stride]),
+        m_c(inp[3 * stride]),
+        m_c(inp[4 * stride]),
+    ];
 
-    m_c(&mut z[0], inp[1 * stride]);
-    m_c(&mut z[1], inp[2 * stride]);
-    m_c(&mut z[2], inp[3 * stride]);
-    m_c(&mut z[3], inp[4 * stride]);
+    [
+        inp[0] + inp[1 * stride] + inp[2 * stride] + inp[3 * stride] + inp[4 * stride],
 
-    out[0] = inp[0] + inp[1 * stride] + inp[2 * stride] + inp[3 * stride] + inp[4 * stride];
-
-    out[1] = inp[0] + z[0][0] + z[1][1] + z[2][2] + z[3][3];
-    out[2] = inp[0] + z[0][1] + z[1][3] + z[2][0] + z[3][2];
-    out[3] = inp[0] + z[0][2] + z[1][0] + z[2][3] + z[3][1];
-    out[4] = inp[0] + z[0][3] + z[1][2] + z[2][1] + z[3][0];
+        inp[0] + z[0][0] + z[1][1] + z[2][2] + z[3][3],
+        inp[0] + z[0][1] + z[1][3] + z[2][0] + z[3][2],
+        inp[0] + z[0][2] + z[1][0] + z[2][3] + z[3][1],
+        inp[0] + z[0][3] + z[1][2] + z[2][1] + z[3][0],
+    ]
 }
 
 impl IMDCT15 {
@@ -118,13 +124,10 @@ impl IMDCT15 {
 
     fn fft15(&self, out: &mut [Complex32], inp: &[Complex32], stride: usize) {
         let exptab = &self.exptab[0];
-        let mut tmp0: [Complex32; 5] = unsafe { mem::uninitialized() };
-        let mut tmp1: [Complex32; 5] = unsafe { mem::uninitialized() };
-        let mut tmp2: [Complex32; 5] = unsafe { mem::uninitialized() };
 
-        fft5(&mut tmp0, &inp[..], stride * 3);
-        fft5(&mut tmp1, &inp[1 * stride..], stride * 3);
-        fft5(&mut tmp2, &inp[2 * stride..], stride * 3);
+        let tmp0 = fft5(&inp[..], stride * 3);
+        let tmp1 = fft5(&inp[1 * stride..], stride * 3);
+        let tmp2 = fft5(&inp[2 * stride..], stride * 3);
 
         for ((i, t0), (t1, t2)) in tmp0.iter().enumerate().zip(tmp1.iter().zip(tmp2.iter())) {
             let e1 = t1 * exptab[i];
@@ -215,9 +218,7 @@ mod test {
 
         println!("{:#?}", a);
 
-        let mut out: [Complex32; 5] = unsafe { mem::uninitialized() };
-
-        super::fft5(&mut out, &a, 3);
+        let mut out = super::fft5(&a, 3);
 
         println!("{:#?}", out);
 
