@@ -19,7 +19,6 @@ extern crate interpolate_name;
 
 extern crate num_complex as complex;
 
-extern crate pretty_env_logger;
 #[macro_use] extern crate log;
 
 extern crate integer_sqrt;
