@@ -1,6 +1,6 @@
-use silk::decoder::*;
-use entropy::*;
-use packet::Packet;
+use crate::silk::decoder::*;
+use crate::entropy::*;
+use crate::packet::Packet;
 
     fn decode(in_slice: &[u8], stereo_out: bool,
               right_outbuf: &[f32], left_outbuf: &[f32]) {

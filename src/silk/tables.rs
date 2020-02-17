@@ -1,4 +1,4 @@
-use entropy::*;
+use crate::entropy::*;
 
 pub const STAGE1: &ICDFContext = &ICDFContext {
     total: 256,
@@ -97,7 +97,7 @@ pub const LSF_STAGE1_WB: &[&ICDFContext] = &[
 ];
 
 pub mod lsf_stage2_nb_mb {
-    use entropy::*;
+    use crate::entropy::*;
 
     pub const A: &ICDFContext = &ICDFContext {
         total: 256,
@@ -171,7 +171,7 @@ pub mod lsf_stage2_nb_mb {
 pub use self::lsf_stage2_nb_mb::MAP as LSF_MAP_NB_MB;
 
 pub mod lsf_stage2_wb {
-    use entropy::*;
+    use crate::entropy::*;
     pub const I: &ICDFContext = &ICDFContext {
         total: 256,
         dist: &[1, 2, 3, 12, 244, 253, 254, 255, 256],

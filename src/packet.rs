@@ -1,6 +1,6 @@
 //! Opus Packet parsing
 
-use codec::error::*;
+use crate::codec::error::*;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Code {

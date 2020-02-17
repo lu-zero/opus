@@ -1,5 +1,5 @@
-use bitstream::bitread::*;
-use maths::*;
+use crate::bitstream::bitread::*;
+use crate::maths::*;
 little_endian_reader!{ ReverseBitReadLE }
 
 impl<'a> ReverseBitReadLE<'a> {

@@ -1,13 +1,13 @@
-use codec::decoder::*;
-use codec::error::*;
-use data::packet::Packet as AVPacket;
-use data::frame::ArcFrame;
+use crate::codec::decoder::*;
+use crate::codec::error::*;
+use crate::data::packet::Packet as AVPacket;
+use crate::data::frame::ArcFrame;
 
-use packet::*;
+use crate::packet::*;
 
-use entropy::*;
-use silk::Silk;
-use celt::Celt;
+use crate::entropy::*;
+use crate::silk::Silk;
+use crate::celt::Celt;
 
 struct Des {
     descr: Descr,
@@ -100,7 +100,7 @@ impl Decoder for Dec {
                         return Err(Error::InvalidData);
                     }
 
-                    let size = size - redundancy_size;
+                    let _size = size - redundancy_size;
 
                     println!("redundancy pos {} size {}", redundancy_pos, redundancy_size);
 
@@ -132,10 +132,10 @@ impl Decoder for Dec {
             unimplemented!()
         }
         fn configure(&mut self) -> Result<()> {
-            use bitstream::byteread::get_i16l;
+            use crate::bitstream::byteread::get_i16l;
 
             let channels;
-            let sample_rate = 48000;
+            let _sample_rate = 48000;
             let mut gain_db = 0;
             let mut streams = 1;
             let mut coupled_streams = 0;
@@ -201,9 +201,9 @@ pub const OPUS_DESCR: &dyn Descriptor = &Des {
 mod test {
     use super::*;
     use matroska::demuxer::*;
-    use format::demuxer::Context;
-    use format::demuxer::Event;
-    use format::buffer::*;
+    use crate::format::demuxer::Context;
+    use crate::format::demuxer::Event;
+    use crate::format::buffer::*;
     use std::fs::File;
     use std::path::PathBuf;
 

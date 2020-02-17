@@ -4,12 +4,12 @@
 //! See [section-4.2](https://tools.ietf.org/html/rfc6716#section-4.2)
 //!
 
-use codec::error::*;
-use entropy::*;
-use maths::*;
-use packet::*;
+use crate::codec::error::*;
+use crate::entropy::*;
+use crate::maths::*;
+use crate::packet::*;
 
-use silk::tables::*;
+use crate::silk::tables::*;
 
 use std::ops::Range;
 

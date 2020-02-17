@@ -1,6 +1,6 @@
 /// Bit-exact functions
 
-use maths::*;
+use crate::maths::*;
 
 // TODO: make sure llvm does the right thing
 #[inline(always)]

@@ -1,4 +1,4 @@
-use complex::*;
+use crate::complex::*;
 
 #[derive(Debug)]
 pub struct IMDCT15 {
@@ -218,7 +218,7 @@ mod test {
 
         println!("{:#?}", a);
 
-        let mut out = super::fft5(&a, 3);
+        let out = super::fft5(&a, 3);
 
         println!("{:#?}", out);
 
