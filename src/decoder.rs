@@ -146,7 +146,7 @@ impl Decoder for Dec {
                 channels = *extradata.get(9).unwrap_or(&2) as usize;
 
                 if extradata.len() >= OPUS_HEAD_SIZE {
-                    gain_db = get_i16l(&extradata[16..17]);
+                    gain_db = get_i16l(&extradata[16..=17]);
                     channel_map = extradata[18] != 0;
                 }
                 if extradata.len() >= OPUS_HEAD_SIZE + 2 + channels {
