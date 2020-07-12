@@ -1,4 +1,4 @@
-# libopus bindings
+# Opus
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
