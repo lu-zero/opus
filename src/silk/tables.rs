@@ -652,7 +652,8 @@ pub const LSF_WEIGHT_WB: &[&[u16]] = &[
 
 pub const LSF_MIN_SPACING_NB_MB: &[i16] = &[250, 3, 6, 3, 3, 3, 4, 3, 3, 3, 461];
 
-pub const LSF_MIN_SPACING_WB: &[i16] = &[100, 3, 40, 3, 3, 3, 5, 14, 14, 10, 11, 3, 8, 9, 7, 3, 347];
+pub const LSF_MIN_SPACING_WB: &[i16] =
+    &[100, 3, 40, 3, 3, 3, 5, 14, 14, 10, 11, 3, 8, 9, 7, 3, 347];
 
 pub const LSF_INTERPOLATION_INDEX: &ICDFContext = &ICDFContext {
     total: 256,
@@ -681,4 +682,3 @@ pub const PITCH_DELTA: &ICDFContext = &ICDFContext {
         256,
     ],
 };
-

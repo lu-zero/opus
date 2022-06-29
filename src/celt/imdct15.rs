@@ -73,7 +73,6 @@ fn fft5(inp: &[Complex32], stride: usize) -> [Complex32; 5] {
 
     [
         inp[0] + inp[1 * stride] + inp[2 * stride] + inp[3 * stride] + inp[4 * stride],
-
         inp[0] + z[0][0] + z[1][1] + z[2][2] + z[3][3],
         inp[0] + z[0][1] + z[1][3] + z[2][0] + z[3][2],
         inp[0] + z[0][2] + z[1][0] + z[2][3] + z[3][1],
@@ -93,7 +92,8 @@ impl IMDCT15 {
             .map(|i| {
                 let v = 2f32 * PI * (i as f32 + 0.125) / len as f32;
                 Complex32::new(v.cos(), v.sin())
-            }).collect();
+            })
+            .collect();
 
         let mut exptab: Vec<Vec<Complex32>> = (0..6)
             .map(|i| {
@@ -102,8 +102,10 @@ impl IMDCT15 {
                     .map(|j| {
                         let v = 2f32 * PI * j as f32 / len as f32;
                         Complex32::new(v.cos(), v.sin())
-                    }).collect()
-            }).collect();
+                    })
+                    .collect()
+            })
+            .collect();
 
         for i in 0..4 {
             let v = exptab[0][i];
@@ -214,7 +216,8 @@ mod test {
             .map(|v| {
                 let v = v as f32;
                 Complex32::new(v, -v)
-            }).collect();
+            })
+            .collect();
 
         println!("{:#?}", a);
 

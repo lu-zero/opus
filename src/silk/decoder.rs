@@ -166,8 +166,8 @@ pub trait Band {
                 nlsfs[Self::ORDER - 1] = (32768 - Self::MIN_SPACING[Self::ORDER] as i32) as i16;
             } else {
                 /*                println!("min_delta {:#?} {} {}", Self::MIN_SPACING,
-                         Self::MIN_SPACING[..k].iter().sum::<i16>(),
-                         32768 - Self::MIN_SPACING[k + 1..].iter().sum::<i16>() as i32); */
+                Self::MIN_SPACING[..k].iter().sum::<i16>(),
+                32768 - Self::MIN_SPACING[k + 1..].iter().sum::<i16>() as i32); */
                 let half_delta = Self::MIN_SPACING[k] as i32 >> 1;
                 let min_center = Self::MIN_SPACING[..k].iter().sum::<i16>() as i32 + half_delta;
                 let max_center =
@@ -734,8 +734,7 @@ const PULSE_COUNT: &[&ICDFContext] = &[
     &ICDFContext {
         total: 256,
         dist: &[
-            58, 151, 211, 234, 241, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255,
-            256,
+            58, 151, 211, 234, 241, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256,
         ],
     },
     &ICDFContext {
@@ -1397,12 +1396,13 @@ impl SilkFrame {
             .map(|(i, lsf_s2)| {
                 let ds = dequant_step(*lsf_s2 as i16);
 
-                let res = ds + if let Some(p) = prev {
-                    let weight = weight_map[weight_map_index[i]][i] as i32;
-                    ((p as i32 * weight) >> 8) as i16
-                } else {
-                    0
-                };
+                let res = ds
+                    + if let Some(p) = prev {
+                        let weight = weight_map[weight_map_index[i]][i] as i32;
+                        ((p as i32 * weight) >> 8) as i16
+                    } else {
+                        0
+                    };
 
                 prev = Some(res);
 
@@ -1805,14 +1805,14 @@ impl SilkFrame {
                         .zip(residuals[start_res..stop_res].iter_mut());
 
                     /*                    println!("previous_w {} {} {} {} {} {} {}",
-                             start,
-                             stop,
-                             - (sf.pitch_lag as isize) - LTP_ORDER as isize / 2,
-                             info.sf_size,
-                             LPC_HISTORY,
-                             i,
-                             order);
-*/
+                                                 start,
+                                                 stop,
+                                                 - (sf.pitch_lag as isize) - LTP_ORDER as isize / 2,
+                                                 info.sf_size,
+                                                 LPC_HISTORY,
+                                                 i,
+                                                 order);
+                    */
                     for ((&o, r), p_w) in iter.zip(previous_w) {
                         let mut sum = o;
 
@@ -2113,16 +2113,16 @@ impl Silk {
             }
         }
 
-/*        println!("stereo {} out {}", self.stereo, self.stereo_out);
-        println!(
-            "right: {:#?}",
-            &self.right_outbuf[..self.frames * self.info.f_size]
-        );
-        println!(
-            "left: {:#?}",
-            &self.left_outbuf[..self.frames * self.info.f_size]
-        );
-*/
+        /*        println!("stereo {} out {}", self.stereo, self.stereo_out);
+                println!(
+                    "right: {:#?}",
+                    &self.right_outbuf[..self.frames * self.info.f_size]
+                );
+                println!(
+                    "left: {:#?}",
+                    &self.left_outbuf[..self.frames * self.info.f_size]
+                );
+        */
         Ok(0)
     }
 }

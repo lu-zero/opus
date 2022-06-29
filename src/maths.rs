@@ -1,6 +1,5 @@
 use std::mem::size_of;
 
-
 // TODO: ask upstream for a trait for leading_zeros
 pub trait ILog {
     fn ilog(&self) -> Self;

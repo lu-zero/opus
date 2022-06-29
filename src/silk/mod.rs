@@ -1,5 +1,5 @@
-mod tables;
 mod decoder;
+mod tables;
 #[cfg(test)]
 mod tests;
 

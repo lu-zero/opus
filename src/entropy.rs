@@ -1,6 +1,6 @@
 use crate::bitstream::bitread::*;
 use crate::maths::*;
-little_endian_reader!{ ReverseBitReadLE }
+little_endian_reader! { ReverseBitReadLE }
 
 impl<'a> ReverseBitReadLE<'a> {
     #[inline(always)]
@@ -33,7 +33,7 @@ impl<'a> BitReadFill for ReverseBitReadLE<'a> {
     }
 }
 
-big_endian_reader!{ UnpaddedBitReadBE }
+big_endian_reader! { UnpaddedBitReadBE }
 
 impl<'a> UnpaddedBitReadBE<'a> {
     #[inline(always)]
@@ -302,10 +302,10 @@ impl<'a> RangeDecoder<'a> {
         let mut bits = UnpaddedBitReadBE::new(buf);
         let value = 127 - bits.get_bits_32(7) as usize;
         let mut r = RangeDecoder {
-            bits: bits,
+            bits,
             revs: ReverseBitReadLE::new(buf),
             range: 128,
-            value: value,
+            value,
             total: SYM_BITS + 1,
             size_in_bits: buf.len() * 8,
         };
@@ -360,7 +360,7 @@ impl<'a> RangeDecoder<'a> {
         let (scale, sym) = self.get_scale_symbol(total);
         let k = dist.iter().position(|v| *v > sym).unwrap();
         println!(
-            "icdf val {} range {} k {}" /* dist {:?}" */,
+            "icdf val {} range {} k {}", /* dist {:?}" */
             self.value, self.range, k, /* dist */
         );
         let high = dist[k];
@@ -494,13 +494,18 @@ impl<'a> CeltOnly for RangeDecoder<'a> {
         let k = if symbol < k1 {
             symbol / 3
         } else {
-            symbol - (k0 + 1) /2
+            symbol - (k0 + 1) / 2
         };
 
         if k <= k0 {
             self.update(scale, 3 * (k + 0), 3 * (k + 1), total);
         } else {
-            self.update(scale, 3 * (k + 1) + (k - 1 - k0), 3 * (k0 + 1) + (k - 0 - k0), total);
+            self.update(
+                scale,
+                3 * (k + 1) + (k - 1 - k0),
+                3 * (k0 + 1) + (k - 0 - k0),
+                total,
+            );
         }
 
         k

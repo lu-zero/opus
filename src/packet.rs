@@ -166,9 +166,9 @@ impl<'a> Packet<'a> {
         let buf = if padding {
             let (off, pad) = xiph_lacing_u32(&buf[1..])?;
             self.padding = pad;
-            &buf[1 + off .. buf.len() - pad]
+            &buf[1 + off..buf.len() - pad]
         } else {
-            &buf[1 ..]
+            &buf[1..]
         };
 
         if self.vbr {
@@ -232,32 +232,32 @@ impl<'a> Packet<'a> {
         match code {
             0 => {
                 p.single_packet(&buf)?;
-            },
+            }
             1 => {
                 p.double_packet_es(&buf)?;
-            },
+            }
             2 => {
                 p.double_packet_va(&buf)?;
-            },
+            }
             3 => {
                 p.multiple_packet(&buf)?;
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
 
         match config {
-            c @ 0 ..= 11 => {
+            c @ 0..=11 => {
                 p.mode = Mode::SILK;
                 match c {
-                    0 ..= 3 => {
+                    0..=3 => {
                         p.bandwidth = Bandwidth::Narrow;
-                    },
-                    4 ..= 7 => {
+                    }
+                    4..=7 => {
                         p.bandwidth = Bandwidth::Medium;
-                    },
-                    8 ..= 11 => {
+                    }
+                    8..=11 => {
                         p.bandwidth = Bandwidth::Wide;
-                    },
+                    }
                     _ => unreachable!(),
                 }
                 match c & 0b11 {
@@ -267,39 +267,39 @@ impl<'a> Packet<'a> {
                     3 => p.frame_duration = FrameDuration::VeryLong,
                     _ => unreachable!(),
                 }
-            },
-            c @ 12 ..= 15 => {
+            }
+            c @ 12..=15 => {
                 p.mode = Mode::HYBRID;
                 match c {
-                    12 ..= 13 => {
+                    12..=13 => {
                         p.bandwidth = Bandwidth::SuperWide;
-                    },
-                    14 ..= 15 => {
+                    }
+                    14..=15 => {
                         p.bandwidth = Bandwidth::Full;
-                    },
+                    }
                     _ => unreachable!(),
                 }
                 match c & 0b1 {
                     0 => p.frame_duration = FrameDuration::Medium,
                     1 => p.frame_duration = FrameDuration::Standard,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
-            },
-            c @ 16 ..= 31 => {
+            }
+            c @ 16..=31 => {
                 p.mode = Mode::CELT;
                 match c {
-                    16 ..= 19 => {
+                    16..=19 => {
                         p.bandwidth = Bandwidth::Narrow;
-                    },
-                    20 ..= 23 => {
+                    }
+                    20..=23 => {
                         p.bandwidth = Bandwidth::Wide;
-                    },
-                    24 ..= 27 => {
+                    }
+                    24..=27 => {
                         p.bandwidth = Bandwidth::SuperWide;
                     }
-                    28 ..= 31 => {
+                    28..=31 => {
                         p.bandwidth = Bandwidth::Full;
-                    },
+                    }
                     _ => unreachable!(),
                 }
                 match c & 0b11 {
@@ -309,7 +309,7 @@ impl<'a> Packet<'a> {
                     3 => p.frame_duration = FrameDuration::Standard,
                     _ => unreachable!(),
                 }
-            },
+            }
             _ => unreachable!(),
         }
 

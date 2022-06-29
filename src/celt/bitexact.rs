@@ -1,5 +1,4 @@
 /// Bit-exact functions
-
 use crate::maths::*;
 
 // TODO: make sure llvm does the right thing

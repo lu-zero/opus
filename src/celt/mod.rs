@@ -1,5 +1,5 @@
-mod imdct15;
-mod decoder;
 mod bitexact;
+mod decoder;
+mod imdct15;
 
 pub use self::decoder::*;

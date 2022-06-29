@@ -1,5 +1,5 @@
-extern crate av_data as data;
 extern crate av_codec as codec;
+extern crate av_data as data;
 
 #[macro_use]
 extern crate av_bitstream as bitstream;
@@ -19,16 +19,16 @@ extern crate interpolate_name;
 
 extern crate num_complex as complex;
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
 extern crate integer_sqrt;
 
 mod entropy;
-mod packet;
 mod maths;
+mod packet;
 
-mod silk;
 mod celt;
+mod silk;
 
 pub mod decoder;
-
