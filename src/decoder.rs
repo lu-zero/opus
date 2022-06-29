@@ -199,9 +199,8 @@ pub const OPUS_DESCR: &dyn Descriptor = &Des {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::format::buffer::*;
-    use crate::format::demuxer::Context;
-    use crate::format::demuxer::Event;
+    use av_format::buffer::*;
+    use av_format::demuxer;
     use matroska::demuxer::*;
     use std::fs::File;
     use std::path::PathBuf;
@@ -209,7 +208,7 @@ mod test {
     use interpolate_name::interpolate_test;
 
     fn parse_packet(sample: &PathBuf) {
-        let mut ctx = Context::new(
+        let mut ctx = demuxer::Context::new(
             Box::new(MkvDemuxer::new()),
             Box::new(AccReader::new(File::open(sample).unwrap())),
         );
@@ -223,7 +222,7 @@ mod test {
         for _ in 0..10 {
             if let Ok(ev) = ctx.read_event() {
                 match ev {
-                    Event::NewPacket(p) => {
+                    demuxer::Event::NewPacket(p) => {
                         println!("{:?}", p);
                         d.send_packet(&p).unwrap();
                     }

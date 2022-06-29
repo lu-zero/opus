@@ -10,15 +10,15 @@ keywords = ["opus"]
 edition = "2018"
 
 [dependencies]
-av-bitstream = { version = "0.1.0", git = "https://github.com/rust-av/rust-av" }
-av-codec = "0.2.0"
-av-data = "0.2.0"
-num-complex = "0.2"
+av-bitstream = { git = "https://github.com/rust-av/rust-av" }
+av-codec = "0.2.2"
+av-data = "0.3.0"
+num-complex = "0.4"
 log = "0.4"
 integer-sqrt = "0.1.2"
 
 [dev-dependencies]
-av-format = "0.2.0"
-matroska = { version = "0.1.0", git = "https://github.com/rust-av/matroska" }
-interpolate_name = "0.1"
-pretty_assertions = "0.5.1"
+av-format = "0.3.0"
+matroska = { git = "https://github.com/rust-av/matroska" }
+interpolate_name = "0.2"
+pretty_assertions = "1.2"
