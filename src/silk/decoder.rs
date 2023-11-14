@@ -1976,7 +1976,7 @@ impl Silk {
             .resize(self.info.f_size * self.frames, 0f32);
     }
 
-    pub fn parse_stereo_weight(&mut self, rd: &mut RangeDecoder, vad: bool) -> bool {
+    pub(crate) fn parse_stereo_weight(&mut self, rd: &mut RangeDecoder, vad: bool) -> bool {
         let w_q13 = [
             -13732, -10050, -8266, -7526, -6500, -5000, -2950, -820, 820, 2950, 5000, 6500, 7526,
             8266, 10050, 13732,
