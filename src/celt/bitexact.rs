@@ -23,8 +23,8 @@ pub fn cos(x: i16) -> i16 {
 
 #[inline(always)]
 pub fn log2tan(isin: i32, icos: i32) -> i32 {
-    let ls = isin.ilog();
-    let lc = icos.ilog();
+    let ls = isin.celt_ilog2();
+    let lc = icos.celt_ilog2();
 
     let isin = (isin << (15 - ls)) as i16;
     let icos = (icos << (15 - lc)) as i16;

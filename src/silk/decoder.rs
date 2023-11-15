@@ -236,7 +236,7 @@ pub trait Band {
                 return invgain >= 107374;
             }
 
-            let b1 = div.ilog();
+            let b1 = div.celt_ilog2();
             let b2 = b1 - 16;
             let inv = ((1 << 29) - 1) / (div >> (b2 + 1));
             let err = (1 << 29) - (div << (15 - b2)).mul_shift(inv, 16);

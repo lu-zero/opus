@@ -373,12 +373,12 @@ impl<'a> RangeDecoder<'a> {
 
     #[inline(always)]
     pub fn tell(&self) -> usize {
-        self.total - self.range.ilog()
+        self.total - self.range.celt_ilog2()
     }
 
     #[inline(always)]
     pub fn tell_frac(&self) -> usize {
-        let mut lg = self.range.ilog();
+        let mut lg = self.range.celt_ilog2();
         let mut rq15 = self.range >> (lg - 16);
 
         for _ in 0..3 {
@@ -425,7 +425,7 @@ impl<'a> CeltOnly for RangeDecoder<'a> {
     }
 
     fn decode_uniform(&mut self, len: usize) -> usize {
-        let bits = (len - 1).ilog();
+        let bits = (len - 1).celt_ilog2();
 
         let total = if bits > UNI_BITS {
             ((len - 1) >> (bits - UNI_BITS)) + 1

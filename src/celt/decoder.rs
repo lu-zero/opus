@@ -2115,7 +2115,7 @@ impl Celt {
 
         let frame_size = frame_duration as usize;
 
-        self.lm = (frame_size / SHORT_BLOCKSIZE).ilog() - 1;
+        self.lm = (frame_size / SHORT_BLOCKSIZE).celt_ilog2() - 1;
 
         println!("framebits {} tell {}", rd.len(), rd.tell());
 

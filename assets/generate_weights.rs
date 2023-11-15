@@ -79,7 +79,7 @@ for codebook in codebooks {
             let next = code[2] as u32;
 
             let weight = (1024 / (cur - prev) + 1024 / (next - cur)) << 16;
-            let i = (weight as usize).ilog();
+            let i = (weight as usize).celt_ilog2();
             let f = (weight >> (i - 8)) & 127;
             let y = (if i & 1 != 0 { 32768 } else { 46214 }) >> ((32 - i) >> 1);
             y + ((213 * f * y) >> 16)
