@@ -595,9 +595,10 @@ fn cwrsi(mut n: u32, mut k: u32, mut i: u32, y: &mut [i32]) -> u32 {
         } else {
             let mut p = pvq_u_row(k as usize)[n as usize] as u32;
             let q = pvq_u_row(k as usize + 1)[n as usize] as u32;
-            println!("p {} q {}", p, q);
-            if i > p && i < q {
+            println!("i {i} p {} q {}", p, q);
+            if i >= p && i < q {
                 i -= p;
+                println!("zeroing {i} {p}");
                 *yy = 0;
             } else {
                 let s = if i >= q {
@@ -1685,7 +1686,11 @@ impl Celt {
 
         let mut time_divide = 0;
         let longblocks = b0 == 1;
-        println!("decode_band N={} lowband_out {}", n, lowband_out.is_some());
+        println!(
+            "decode_band N={} lowband_out {}",
+            n,
+            lowband_out.is_some() as usize
+        );
 
         println!("mid_buf");
         for v in mid_buf[..n].iter() {
@@ -1762,6 +1767,8 @@ impl Celt {
             0
         };
 
+        let mut lowband = lowband.as_deref();
+
         let cache = &CACHE_BITS[CACHE_INDEX[(lm + 1) as usize * MAX_BANDS + band] as usize..];
 
         let split = if !dualstereo && lm >= 0 && b > (cache[cache[0] as usize] as i32) + 12 && n > 2
@@ -1785,7 +1792,7 @@ impl Celt {
         println!("split {} blocks {} lm {}", split as u8, blocks, lm);
 
         // TODO: move this code out
-        let mut cm = if split {
+        let mut cm = if let Some(side_buf) = side_buf {
             let info = self.compute_theta(
                 rd,
                 band,
@@ -1800,21 +1807,23 @@ impl Celt {
             let BandInfo {
                 itheta,
                 inv: _,
-                mid: _,
-                side: _,
-                delta,
+                mid,
+                side,
+                mut delta,
                 qalloc,
                 fill: _,
             } = info;
 
             b -= qalloc as i32;
 
-            println!("itheta {} delta {}", itheta, delta);
+            println!(
+                "itheta {} delta {} n {} dualstereo {}",
+                itheta, delta, n, dualstereo as usize
+            );
             /* This is a special case for N=2 that only works for stereo and takes
             advantage of the fact that mid and side are orthogonal to encode
             the side with just one bit. */
-            if n == 2 && dualstereo {
-                let side_buf = side_buf.as_mut().unwrap();
+            let cm = if n == 2 && dualstereo {
                 let sbits = if itheta != 0 || itheta != 16384 {
                     1 << 3
                 } else {
@@ -1847,21 +1856,127 @@ impl Celt {
                     fill,
                 );
                 side_buf2[0] = -sign * mid_buf2[1];
-            }
+                // TODO complete the mapping
+                //
+                cm
+            } else {
+                let mut next_lowband2 = None;
+                let mut next_lowband_out1 = None;
+                // normal split
 
-            /*
-                        if let Some(side_buf) = side_buf { // same as dualstereo
-                            if n != 2 {
-                                // stereo_merge
-                            }
-                            if inv {
-                                for v in side_buf[..n].iter_mut() {
-                                    *v *= -1.0;
-                                }
-                            }
-                        }
-            */
-            0
+                if b0 > 1 && !dualstereo && (itheta & 0x3fff) != 0 {
+                    if itheta > 8192 {
+                        delta -= delta >> (4 - lm);
+                    } else {
+                        delta = (delta + (n << 3 >> (5 - lm)) as i16).min(0)
+                    }
+                }
+
+                println!("delta {delta}");
+                let mut mbits = ((b - delta as i32) / 2).clamp(0, b);
+                let mut sbits = b - mbits;
+
+                self.remaining2 -= qalloc as i32;
+
+                if !dualstereo {
+                    if let Some(bands) = lowband.take() {
+                        let bands = bands.split_at(n);
+                        lowband = Some(bands.0);
+                        next_lowband2 = Some(bands.1);
+                    }
+                }
+
+                let mut next_level = 0;
+
+                if dualstereo {
+                    next_lowband_out1 = lowband_out;
+                } else {
+                    next_level += 1;
+                }
+
+                let rebalance = self.remaining2;
+                let side_shift = if dualstereo { b0 >> 1 } else { 0 };
+                if mbits >= sbits {
+                    let mut cm = self.decode_band(
+                        rd,
+                        band,
+                        mid_buf,
+                        None,
+                        n,
+                        mbits,
+                        blocks,
+                        lowband,
+                        next_lowband_out1,
+                        lm,
+                        next_level,
+                        if dualstereo { 1.0 } else { gain * mid },
+                        fill,
+                    );
+                    let rebalance = mbits - (rebalance - self.remaining2);
+                    if rebalance > 3 << 3 && itheta != 0 {
+                        sbits += rebalance - (3 << 3);
+                    }
+
+                    cm |= self.decode_band(
+                        rd,
+                        band,
+                        side_buf,
+                        None,
+                        n,
+                        sbits,
+                        blocks,
+                        next_lowband2,
+                        None,
+                        lm,
+                        next_level,
+                        gain * side,
+                        fill >> blocks,
+                    ) << side_shift;
+                    cm
+                } else {
+                    let mut cm = self.decode_band(
+                        rd,
+                        band,
+                        side_buf,
+                        None,
+                        n,
+                        sbits,
+                        blocks,
+                        next_lowband2,
+                        None,
+                        lm,
+                        next_level,
+                        gain * side,
+                        fill >> blocks,
+                    ) << side_shift;
+
+                    let rebalance = sbits - (rebalance - self.remaining2);
+                    if rebalance > 3 << 3 && itheta != 16384 {
+                        mbits += rebalance - (3 << 3);
+                    }
+
+                    cm |= self.decode_band(
+                        rd,
+                        band,
+                        mid_buf,
+                        None,
+                        n,
+                        mbits,
+                        blocks,
+                        lowband,
+                        next_lowband_out1,
+                        lm,
+                        next_level,
+                        gain * mid,
+                        fill,
+                    );
+
+                    cm
+                }
+            };
+
+            todo!("split");
+            cm
         } else {
             self.decode_band_no_split(
                 rd,
